@@ -1,0 +1,43 @@
+server:
+  port: 8080
+
+embedding:
+  provider-url: ${EMBEDDING_PROVIDER_URL:http://172.16.115.105:11434/v1/embeddings}
+
+cache:
+  type: ${CACHE_TYPE:postgres} # 'redis' or 'postgres'
+
+spring:
+  application:
+    name: embedding-cache
+
+  # Redis Configuration
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      
+  # PostgreSQL Configuration
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/embeddings}
+    username: ${DB_USER:embeddings}
+    password: ${DB_PASSWORD:embeddings}
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: update # Automatically create/update schema for EmbeddingEntity
+    show-sql: false
+
+# Actuator Configuration
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  level:
+    org.lareferencia.embedding: DEBUG
