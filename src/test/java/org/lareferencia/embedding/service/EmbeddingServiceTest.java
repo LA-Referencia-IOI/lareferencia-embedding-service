@@ -7,13 +7,12 @@ import org.junit.jupiter.api.Test;
 import org.lareferencia.embedding.cache.EmbeddingCache;
 import org.lareferencia.embedding.client.EmbeddingClient;
 import org.lareferencia.embedding.dto.EmbeddingResponse;
-import org.lareferencia.embedding.util.EmbeddingSerializationUtil;
+import org.lareferencia.embedding.util.TextNormalizer;
 
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -23,6 +22,7 @@ class EmbeddingServiceTest {
     private EmbeddingCache cache;
     private EmbeddingClient client;
     private MeterRegistry meterRegistry;
+    private TextNormalizer textNormalizer;
     private EmbeddingService service;
 
     @BeforeEach
@@ -30,7 +30,8 @@ class EmbeddingServiceTest {
         cache = mock(EmbeddingCache.class);
         client = mock(EmbeddingClient.class);
         meterRegistry = new SimpleMeterRegistry();
-        service = new EmbeddingService(cache, client, meterRegistry);
+        textNormalizer = new TextNormalizer();
+        service = new EmbeddingService(cache, client, meterRegistry, textNormalizer);
     }
 
     @Test
@@ -49,8 +50,8 @@ class EmbeddingServiceTest {
         assertEquals(mockEmbedding, response.embedding());
 
         verify(client, times(1)).generateEmbedding(input, model);
-        verify(cache, times(1)).put(anyString(), any(byte[].class));
-        
+        verify(cache, times(1)).put(anyString(), eq(mockEmbedding));
+
         assertEquals(1, meterRegistry.counter("embedding.cache.misses", "model", model).count());
     }
 
@@ -59,9 +60,8 @@ class EmbeddingServiceTest {
         String input = "hello world";
         String model = "test-model";
         List<Double> mockEmbedding = List.of(0.1, 0.2, 0.3);
-        byte[] serializedEmbedding = EmbeddingSerializationUtil.serialize(mockEmbedding);
 
-        when(cache.get(anyString())).thenReturn(Optional.of(serializedEmbedding));
+        when(cache.get(anyString())).thenReturn(Optional.of(mockEmbedding));
 
         EmbeddingResponse response = service.getEmbedding(input, model);
 
@@ -70,7 +70,7 @@ class EmbeddingServiceTest {
         assertEquals(mockEmbedding, response.embedding());
 
         verify(client, never()).generateEmbedding(anyString(), anyString());
-        
+
         assertEquals(1, meterRegistry.counter("embedding.cache.hits", "model", model).count());
     }
 }

@@ -1,8 +1,9 @@
 package org.lareferencia.embedding.cache;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface EmbeddingCache {
-    Optional<byte[]> get(String key);
-    void put(String key, byte[] embedding);
+    Optional<List<Double>> get(String key);
+    void put(String key, List<Double> embedding);
 }

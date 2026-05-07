@@ -1,13 +1,11 @@
 package org.lareferencia.embedding.cache;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "embeddings")
@@ -18,9 +16,17 @@ import lombok.NoArgsConstructor;
 public class EmbeddingEntity {
 
     @Id
-    @Column(name = "key", nullable = false, length = 64)
-    private String key;
+    @Column(name = "hash_key", length = 64)
+    private String hashKey;
 
-    @Column(name = "value", columnDefinition = "bytea", nullable = false)
-    private byte[] value;
+    @Column(name = "embedding", columnDefinition = "vector(2560)")
+    private float[] embedding;
+
+    @Column(name = "created_at", updatable = false)
+    private LocalDateTime createdAt;
+
+    @PrePersist
+    protected void onCreate() {
+        this.createdAt = LocalDateTime.now();
+    }
 }

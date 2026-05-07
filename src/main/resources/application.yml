@@ -4,19 +4,10 @@ server:
 embedding:
   provider-url: ${EMBEDDING_PROVIDER_URL:http://172.16.115.105:11434/v1/embeddings}
 
-cache:
-  type: ${CACHE_TYPE:postgres} # 'redis' or 'postgres'
-
 spring:
   application:
     name: embedding-cache
 
-  # Redis Configuration
-  data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-      
   # PostgreSQL Configuration
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/embeddings}

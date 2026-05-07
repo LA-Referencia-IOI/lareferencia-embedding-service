@@ -8,7 +8,7 @@ import net.jpountz.xxhash.XXHashFactory;
 import org.lareferencia.embedding.cache.EmbeddingCache;
 import org.lareferencia.embedding.client.EmbeddingClient;
 import org.lareferencia.embedding.dto.EmbeddingResponse;
-import org.lareferencia.embedding.util.EmbeddingSerializationUtil;
+import org.lareferencia.embedding.util.TextNormalizer;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -23,42 +23,44 @@ public class EmbeddingService {
     private final EmbeddingClient embeddingClient;
     private final XXHash64 xxHash64;
     private final MeterRegistry meterRegistry;
+    private final TextNormalizer textNormalizer;
 
     public EmbeddingService(
             EmbeddingCache embeddingCache,
             EmbeddingClient embeddingClient,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry,
+            TextNormalizer textNormalizer) {
         this.embeddingCache = embeddingCache;
         this.embeddingClient = embeddingClient;
         this.xxHash64 = XXHashFactory.fastestInstance().hash64();
         this.meterRegistry = meterRegistry;
+        this.textNormalizer = textNormalizer;
     }
 
     public EmbeddingResponse getEmbedding(String input, String model) {
-        byte[] inputBytes = input.getBytes(StandardCharsets.UTF_8);
+        String normalizedInput = textNormalizer.normalize(input);
+        byte[] inputBytes = normalizedInput.getBytes(StandardCharsets.UTF_8);
         long hash = xxHash64.hash(inputBytes, 0, inputBytes.length, 0);
-        String cacheKey = String.format("embedding:%s:%s", model, Long.toHexString(hash));
+        String cacheKey = String.format("%s:%s", model, Long.toHexString(hash));
 
-        Optional<byte[]> cachedData = embeddingCache.get(cacheKey);
+        Optional<List<Double>> cachedEmbedding = embeddingCache.get(cacheKey);
 
-        if (cachedData.isPresent()) {
+        if (cachedEmbedding.isPresent()) {
             log.info("Cache HIT for key: {}", cacheKey);
             meterRegistry.counter("embedding.cache.hits", "model", model).increment();
-            List<Double> embedding = EmbeddingSerializationUtil.deserialize(cachedData.get());
-            return new EmbeddingResponse(model, embedding);
+            return new EmbeddingResponse(model, cachedEmbedding.get());
         }
 
         log.info("Cache MISS for key: {}", cacheKey);
         meterRegistry.counter("embedding.cache.misses", "model", model).increment();
 
         Timer.Sample sample = Timer.start(meterRegistry);
-        List<Double> embedding = embeddingClient.generateEmbedding(input, model);
+        List<Double> embedding = embeddingClient.generateEmbedding(normalizedInput, model);
         sample.stop(meterRegistry.timer("embedding.generation.latency", "model", model));
 
         meterRegistry.counter("embedding.generation.count", "model", model).increment();
 
-        byte[] binaryData = EmbeddingSerializationUtil.serialize(embedding);
-        embeddingCache.put(cacheKey, binaryData);
+        embeddingCache.put(cacheKey, embedding);
 
         return new EmbeddingResponse(model, embedding);
     }

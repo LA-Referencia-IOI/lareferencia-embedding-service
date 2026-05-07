@@ -5,214 +5,122 @@
 The current indexing pipeline regenerates embeddings for identical strings during reindexing, introducing unnecessary computational overhead and increased processing time.
 
 This architecture introduces a **deterministic embedding cache** to:
-
-- Eliminate redundant embedding generation  
-- Reduce dependency on Ollama/Qwen inference  
-- Improve indexing throughput  
-- Optimize infrastructure cost (CPU/GPU vs RAM vs disk)  
+- Eliminate redundant embedding generation.
+- Reduce dependency on Ollama/Qwen inference.
+- Improve indexing throughput.
+- Optimize infrastructure cost (CPU/GPU vs Disk).
 
 ---
 
 ## 2. Core Design Principles
 
 ### Deterministic Processing
-Same input → same normalized string → same hash → same embedding  
+The system ensures that the same input always leads to the same normalized string, resulting in the same hash and retrieval of the same embedding.
 
 ### Model Isolation
-Cache scoped by model: `qwen3-embedding:4b`  
+Cache entries are strictly scoped by model name and version to prevent the reuse of incompatible embeddings across different neural architectures.
 
-### Storage Efficiency
-Binary serialization (no JSON)  
+### Data Integrity & Auditability
+By utilizing native vector types, the database enforces dimension constraints at the schema level. This allows for human-readable SQL audits and ensures that all stored data meets the model's requirements.
 
-### Scalability First
-Designed to support millions of embeddings  
+### Scalability
+The strategy prioritizes disk-based storage to support **15 million+** embeddings (~150 GB) without the prohibitive RAM costs associated with in-memory databases.
 
 ---
 
 ## 3. Data Flow Diagram
 
+
+
 ```mermaid
 flowchart TD
-    D[Text]
-    D --> E["Hash Generation (xxHash)"]
+    A[Raw Text] --> B[Text Normalization]
+    B --> C["Hash Generation (xxHash128)"]
     
-    E --> F{Cache Lookup}
+    C --> D{Postgres Lookup}
 
-    F -->|HIT| G[Return Embedding]
-    F -->|MISS| H["Generate Embedding (Ollama + Qwen3)"]
+    D -->|HIT| E[Return Embedding]
+    D -->|MISS| F["Generate Embedding (Ollama + Qwen3)"]
 
-    H --> I[Persist Embedding]
-    I --> G
+    F --> G[Persist in pgvector]
+    G --> E
 ```
 
 ---
 
-## 4. Hashing Strategy
+## 4. Normalization & Hashing Strategy
 
-### Algorithm: xxHash (xxHash64 or xxHash128)
+### Step 1: Text Normalization
+The text normalization component prepares the input text before hashing. The goal is to avoid generating different hashes for semantically identical or operationally equivalent text strings caused by minor formatting differences.
 
-- High-performance, low-latency hashing  
-- Suitable for high-throughput pipelines  
+The normalization strategy must have an explicit version.
 
-### Cache Key Format
+**Normalization Version: `v1`**
 
-```
-embedding:qwen3-embedding:4b:{hash}
-```
+**Initial normalization rules (v1):**
+- **Trim whitespace:** Remove leading and trailing whitespace.
+- **Normalize Unicode:** Standardize Unicode characters.
+- **Collapse spaces:** Reduce multiple spaces into a single space.
+- **Convert line breaks:** Replace repeated line breaks with a single space.
+- **Preserve Case:** Casing is preserved in version 1.
+- **Preserve Accents:** Accents and diacritics are preserved in version 1.
 
----
-## 5. Storage Strategy Options
+**Example:**
+- **Input:** `"  Este   es un texto\n\nacadémico  "`
+- **Normalized:** `"Este es un texto académico"`
 
-## Option A — Redis (Primary Cache with RDB Persistence)
-
-### Characteristics
-
-- In-memory cache (low latency)  
-- Configured with **RDB snapshots** for persistence  
-- Suitable for small to medium datasets  
-
-### Data Representation (Mandatory)
-
-Use **binary serialization**:
-
-```java
-ByteBuffer buffer = ByteBuffer.allocate(embedding.length * 4);
-for (float value : embedding) {
-    buffer.putFloat(value);
-}
-byte[] bytes = buffer.array();
-```
-
-### Memory Profile
-
-- 2560 dimensions × 4 bytes = ~10 KB per embedding  
-
-| Volume        | Memory |
-|--------------|--------|
-| 100k         | ~1 GB  |
-| 1M           | ~10 GB |
-
-### Optimization Options
-
-- Enable RDB snapshots  
-- Apply quantization:
-  - float32 → float16 (50% reduction)  
-  - float32 → int8 (75% reduction, lower precision)  
-
-### Trade-offs
-
-| Advantage        | Limitation        |
-|-----------------|------------------|
-| Ultra-fast      | RAM expensive     |
-| Simple setup    | Limited scalability |
+### Step 2: Hashing (xxHash128)
+- **Algorithm:** xxHash128 (XXH3) is used for its exceptional speed and low collision probability.
+- **Implementation:** The output is stored as a 32-character hexadecimal string, providing a unique fingerprint for the normalized text.
 
 ---
 
-## Option B — PostgreSQL + pgvector (Recommended for Scale)
+## 5. Storage Strategy: PostgreSQL + pgvector
 
 ### Role
+PostgreSQL serves as the primary persistent embedding cache, leveraging the `pgvector` extension for specialized vector operations.
 
-Primary persistent embedding cache.
+### Resource Requirements (Scale: 15 Million Vectors)
+For 2560-dimensional vectors using standard floating-point precision, each entry occupies approximately 10 KB of storage.
 
-### Schema
+| Quantity | Disk Space | Recommended RAM |
+| :--- | :--- | :--- |
+| 1 Million | ~10 GB | ~2 GB |
+| 10 Million | ~100 GB | ~16 GB |
+| **15 Million** | **~150 GB** | **~24 GB - 32 GB** |
 
-```sql
-CREATE TABLE embedding_cache (
-    hash_key CHAR(32) PRIMARY KEY,
-    model TEXT NOT NULL,
-    content_text TEXT,
-    embedding VECTOR(2560)
-);
-```
+### Comparative Analysis: Why pgvector?
 
-### Characteristics
-
-- Disk-based storage (scales to millions)  
-- Native vector support via `pgvector`  
-- PostgreSQL manages caching automatically (buffer pool)  
-- Lower cost compared to Redis RAM scaling  
-
-### Trade-offs
-
-| Advantage        | Limitation        |
-|-----------------|------------------|
-| Scalable        | Higher latency    |
-| Cost-efficient  | Requires tuning   |
+| Feature | pgvector | BYTEA (Binary) |
+| :--- | :--- | :--- |
+| **Integrity** | Enforces 2560 dimensions | None (accepts any binary data) |
+| **Audit/Test** | Readable via SQL (`SELECT`) | Binary blobs (requires deserialization) |
+| **Performance** | Native serialization via Driver | Manual conversion overhead in App |
+| **Infrastructure** | Standard SSD (Low Cost) | Standard SSD (Low Cost) |
 
 ---
 
-## 6. Lookup Strategy
+## 6. Operational Considerations
 
-```
-1. Normalize input text
-2. Generate xxHash
-3. Lookup in cache (Redis OR PostgreSQL)
-4. If HIT → return embedding
-5. If MISS → generate via Ollama (Qwen3)
-6. Persist embedding
-7. Return embedding
-```
+### Performance & Reliability
+- **Serialization:** Offloads the heavy lifting of data conversion to the database driver, minimizing CPU spikes in the application layer.
+- **ACID Compliance:** Uses PostgreSQL’s transactional guarantees to ensure that the cache remains consistent even after system failures.
 
----
+### Auditability & Observability
+Storing embeddings in a native format allows for direct inspection. Administrators can run SQL queries to identify anomalies, such as zero-vectors or null entries, without needing to invoke the application logic.
 
-## 7. Spring Boot Service Design
-
-```java
-@Service
-public class EmbeddingService {
-
-    public float[] getEmbedding(String rawText) {
-        String normalized = normalize(rawText);
-        String hash = xxHash(normalized);
-
-        float[] embedding = cache.get(hash);
-        if (embedding != null) {
-            return embedding;
-        }
-
-        embedding = ollamaClient.generate(normalized);
-
-        cache.put(hash, embedding);
-
-        return embedding;
-    }
-}
-```
+### Testing Efficiency
+The use of native types simplifies the CI/CD pipeline. Test vectors can be managed through standard SQL migration scripts, and validation can be performed directly against the database state.
 
 ---
 
-## 8. Operational Considerations
+## 7. Summary Pros & Cons
 
-### Model Versioning
-
-- Include model name in cache key  
-- Prevent reuse of incompatible embeddings  
-
----
-
-### Memory vs Scale Decision
-
-| Dataset Size | Recommendation |
-|-------------|---------------|
-| < 500k      | Redis         |
-| ≥ millions  | PostgreSQL    |
-
----
-
-### Failure Handling
-
-| Scenario            | Behavior                         |
-|--------------------|----------------------------------|
-| Cache unavailable  | Fallback to generation           |
-| Ollama failure     | Retry + circuit breaker          |
-
----
-
-## 9. Final Recommendation
-
-- Use **xxHash** for hashing  
-- Use **binary serialization** for embeddings  
-- Choose storage based on dataset size:
-
-> Redis (with RDB) for smaller datasets  
-> PostgreSQL + pgvector for large-scale systems  
+*   **Pros:** 
+    *   Significant cost savings by utilizing SSD storage over RAM.
+    *   Automatic validation of vector dimensions at the database level.
+    *   Transparent data management and easier debugging through standard SQL.
+    *   Simplified architecture by reusing existing relational database infrastructure.
+*   **Cons:** 
+    *   Requires the `pgvector` extension to be installed on the database server.
+    *   Slightly higher latency than pure in-memory solutions (though typically negligible for indexing pipelines).
