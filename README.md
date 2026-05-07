@@ -36,6 +36,26 @@ The application is configured via environment variables. Default values are prov
 
 ---
 
+## 📊 Data Flow Architecture
+
+The following diagram illustrates the lifecycle of an embedding request:
+
+```mermaid
+flowchart TD
+    A[Request: String or List] --> B[Text Normalization v1]
+    B --> C["Hash Generation (xxHash128)"]
+    C --> D{"Cache Lookup (Postgres)"}
+
+    D -->|HIT| E[Assemble Response]
+    D -->|MISS| F["Batch Fetch from Provider (Ollama/OpenAI)"]
+
+    F --> G[Persist in pgvector]
+    G --> E
+    E --> H["JSON Response (OpenAI Format)"]
+```
+
+---
+
 ## 🚀 Getting Started
 
 ### 1. Database Setup
