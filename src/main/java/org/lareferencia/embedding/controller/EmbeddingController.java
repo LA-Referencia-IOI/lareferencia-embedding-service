@@ -1,5 +1,7 @@
 package org.lareferencia.embedding.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.lareferencia.embedding.dto.EmbeddingRequest;
 import org.lareferencia.embedding.dto.EmbeddingResponse;
@@ -13,10 +15,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/embeddings")
 @RequiredArgsConstructor
+@Tag(name = "Embedding Generation", description = "Endpoints for generating and retrieving embeddings with caching")
 public class EmbeddingController {
 
     private final EmbeddingService embeddingService;
 
+    @Operation(summary = "Generate or retrieve embeddings", description = "Takes a single string or a list of strings and returns embeddings following the OpenAI API contract. Results are cached.")
     @PostMapping
     public ResponseEntity<EmbeddingResponse> generateEmbedding(@RequestBody EmbeddingRequest request) {
         if (request == null || request.input() == null || request.model() == null || request.model().trim().isEmpty()) {
