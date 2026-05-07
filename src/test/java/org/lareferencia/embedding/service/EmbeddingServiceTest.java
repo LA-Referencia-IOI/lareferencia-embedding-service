@@ -35,42 +35,57 @@ class EmbeddingServiceTest {
     }
 
     @Test
-    void testGetEmbedding_CacheMiss() {
+    void testGetEmbeddings_CacheMiss() {
         String input = "hello world";
         String model = "test-model";
         List<Double> mockEmbedding = List.of(0.1, 0.2, 0.3);
 
         when(cache.get(anyString())).thenReturn(Optional.empty());
-        when(client.generateEmbedding(eq(input), eq(model))).thenReturn(mockEmbedding);
+        when(client.generateEmbeddings(eq(List.of(input)), eq(model))).thenReturn(List.of(mockEmbedding));
 
-        EmbeddingResponse response = service.getEmbedding(input, model);
+        EmbeddingResponse response = service.getEmbeddings(List.of(input), model);
 
         assertNotNull(response);
         assertEquals(model, response.model());
-        assertEquals(mockEmbedding, response.embedding());
+        assertEquals("list", response.object());
+        assertEquals(1, response.data().size());
+        assertEquals(mockEmbedding, response.data().get(0).embedding());
+        assertEquals(0, response.data().get(0).index());
+        assertEquals("embedding", response.data().get(0).object());
 
-        verify(client, times(1)).generateEmbedding(input, model);
+        verify(client, times(1)).generateEmbeddings(anyList(), eq(model));
         verify(cache, times(1)).put(anyString(), eq(mockEmbedding));
 
         assertEquals(1, meterRegistry.counter("embedding.cache.misses", "model", model).count());
     }
 
     @Test
-    void testGetEmbedding_CacheHit() {
-        String input = "hello world";
+    void testGetEmbeddings_MixedCacheAndGeneration() {
+        String input1 = "cached";
+        String input2 = "missing";
         String model = "test-model";
-        List<Double> mockEmbedding = List.of(0.1, 0.2, 0.3);
+        List<Double> embedding1 = List.of(0.1);
+        List<Double> embedding2 = List.of(0.2);
 
-        when(cache.get(anyString())).thenReturn(Optional.of(mockEmbedding));
+        // Mock first call (input1) as hit, second call (input2) as miss
+        when(cache.get(anyString())).thenReturn(Optional.of(embedding1), Optional.empty());
 
-        EmbeddingResponse response = service.getEmbedding(input, model);
+        when(client.generateEmbeddings(eq(List.of("missing")), eq(model))).thenReturn(List.of(embedding2));
+
+        EmbeddingResponse response = service.getEmbeddings(List.of(input1, input2), model);
 
         assertNotNull(response);
-        assertEquals(model, response.model());
-        assertEquals(mockEmbedding, response.embedding());
+        assertEquals(2, response.data().size());
+        // Verify order preservation and indices
+        assertEquals(embedding1, response.data().get(0).embedding());
+        assertEquals(0, response.data().get(0).index());
+        assertEquals(embedding2, response.data().get(1).embedding());
+        assertEquals(1, response.data().get(1).index());
 
-        verify(client, never()).generateEmbedding(anyString(), anyString());
+        verify(client, times(1)).generateEmbeddings(eq(List.of("missing")), eq(model));
+        verify(cache, times(1)).put(anyString(), eq(embedding2));
 
         assertEquals(1, meterRegistry.counter("embedding.cache.hits", "model", model).count());
+        assertEquals(1, meterRegistry.counter("embedding.cache.misses", "model", model).count());
     }
 }
