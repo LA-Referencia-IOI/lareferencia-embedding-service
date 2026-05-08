@@ -1,8 +1,8 @@
-# 🚀 LA Referencia Embedding Cache
+# LA Referencia Embedding Cache
 
 A high-performance, deterministic embedding cache microservice designed to eliminate redundant embedding generation and optimize infrastructure costs for large-scale indexing pipelines.
 
-## 🌟 Key Features
+## Key Features
 
 - **Deterministic Caching:** Ensures identical input strings always map to the same cached embedding.
 - **Text Normalization (v1):** Applied before hashing to prevent minor formatting discrepancies (spaces, line breaks, etc.) from causing cache misses.
