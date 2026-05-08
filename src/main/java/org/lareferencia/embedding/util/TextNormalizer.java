@@ -30,6 +30,8 @@ public class TextNormalizer {
             return null;
         }
 
+        // TODO: Do we normalize case-sensitive values to lowercase?
+
         // 1. Unicode Normalization (NFC)
         String normalized = Normalizer.normalize(input, Normalizer.Form.NFC);
 

@@ -1,8 +1,11 @@
 server:
   port: 8080
+  error:
+    include-message: always
 
 embedding:
   provider-url: ${EMBEDDING_PROVIDER_URL:http://172.16.115.105:11434/v1/embeddings}
+  timeout-ms: ${EMBEDDING_TIMEOUT_MS:10000}
 
 spring:
   application:

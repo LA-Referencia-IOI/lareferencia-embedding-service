@@ -30,7 +30,7 @@ The following diagram illustrates the lifecycle of an embedding request:
 
 ```mermaid
 flowchart TD
-    A[Request: String or List] --> B[Text Normalization v1]
+    A["String or List, Model (OpenRouter Format)"] --> B[Text Normalization v1]
     B --> C["Hash Generation (xxHash64)"]
     C --> D{"Cache Lookup (Postgres)"}
 
@@ -39,7 +39,7 @@ flowchart TD
 
     F --> G[Persist in pgvector]
     G --> E
-    E --> H["JSON Response (OpenAI Format)"]
+    E --> H["JSON Response (OpenRouter Format)"]
 ```
 
 ---
@@ -77,3 +77,6 @@ Leveraging `pgvector` allows for native vector operations and dimension enforcem
 - **Auditability:** Native types allow for human-readable SQL audits.
 - **ACID Compliance:** Ensures cache consistency even during system failures.
 - **Observability:** Built-in Prometheus metrics and health checks via Spring Actuator.
+
+## References
+- https://www.linkedin.com/posts/rponte_hey-mysql-redis-ugcPost-7120111858719600641-mRF_/

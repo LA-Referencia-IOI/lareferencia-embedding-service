@@ -42,7 +42,7 @@ The following diagram illustrates the lifecycle of an embedding request:
 
 ```mermaid
 flowchart TD
-    A[Request: String or List] --> B[Text Normalization v1]
+    A["String or List, Model (OpenRouter Format)"] --> B[Text Normalization v1]
     B --> C["Hash Generation (xxHash64)"]
     C --> D{"Cache Lookup (Postgres)"}
 
@@ -51,7 +51,7 @@ flowchart TD
 
     F --> G[Persist in pgvector]
     G --> E
-    E --> H["JSON Response (OpenAI Format)"]
+    E --> H["JSON Response (OpenRouter Format)"]
 ```
 
 ---

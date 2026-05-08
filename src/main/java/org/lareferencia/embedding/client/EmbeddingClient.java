@@ -2,10 +2,13 @@ package org.lareferencia.embedding.client;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
@@ -19,8 +22,16 @@ public class EmbeddingClient {
 
     public EmbeddingClient(
             RestClient.Builder restClientBuilder,
-            @Value("${embedding.provider-url}") String providerUrl) {
-        this.restClient = restClientBuilder.build();
+            @Value("${embedding.provider-url}") String providerUrl,
+            @Value("${embedding.timeout-ms:10000}") int timeoutMs) {
+
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(timeoutMs);
+        factory.setReadTimeout(timeoutMs);
+
+        this.restClient = restClientBuilder
+                .requestFactory(factory)
+                .build();
         this.providerUrl = providerUrl;
     }
 
@@ -42,7 +53,7 @@ public class EmbeddingClient {
                 throw new RuntimeException("Received null response from embedding provider");
             }
 
-            // Support both standard Ollama (/api/embeddings), newer (/api/embed) 
+            // Support both standard Ollama (/api/embeddings), newer (/api/embed)
             // and OpenAI-compatible (/v1/embeddings) formats
             if (response.embeddings() != null && !response.embeddings().isEmpty()) {
                 return response.embeddings();
@@ -58,7 +69,8 @@ public class EmbeddingClient {
                     "Received invalid response structure from embedding provider (no embeddings found)");
         } catch (RestClientException e) {
             log.error("Failed to generate embedding from provider", e);
-            throw new RuntimeException("Failed to generate embedding", e);
+
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Embedding provider " + e.getMessage());
         }
     }
 
@@ -72,7 +84,7 @@ public class EmbeddingClient {
                     .body(Object.class);
         } catch (RestClientException e) {
             log.error("Failed to fetch models from provider", e);
-            throw new RuntimeException("Failed to fetch models", e);
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Embedding provider " + e.getMessage());
         }
     }
 
