@@ -1,40 +1,37 @@
-server:
-  port: 8080
+server.port: 8080
+server.error.include-message: always
 
-embedding:
-  provider-url: ${EMBEDDING_PROVIDER_URL:http://172.16.115.105:11434/v1/embeddings}
-  timeout-ms: ${EMBEDDING_TIMEOUT_MS:10000}
+app.embedding.max-batch-size: ${EMBEDDING_MAX_BATCH_SIZE:128}
+app.embedding.max-input-length: ${EMBEDDING_MAX_INPUT_LENGTH:8192}
+app.embedding.provider.connect-timeout: ${OLLAMA_CONNECT_TIMEOUT:5s}
+app.embedding.provider.request-timeout: ${OLLAMA_REQUEST_TIMEOUT:30s}
 
-cache:
-  type: ${CACHE_TYPE:rocksdb} # Options: rocksdb, postgres, sqlite
-  rocksdb:
-    path: ${ROCKSDB_PATH:./data/rocksdb/embedding-cache}
-  sqlite:
-    path: ${SQLITE_PATH:./data/sqlite/embedding-cache.db}
+spring.application.name: embedding-cache
+spring.datasource.url: ${DB_URL:jdbc:postgresql://localhost:5432/embeddings}
+spring.datasource.username: ${DB_USER:embeddings}
+spring.datasource.password: ${DB_PASSWORD:embeddings}
+spring.datasource.driver-class-name: org.postgresql.Driver
+spring.jpa.hibernate.ddl-auto: update
+spring.jpa.open-in-view: false
+spring.jpa.properties.hibernate.jdbc.time_zone: UTC
 
-spring:
-  application:
-    name: embedding-cache
-  web:
-    error:
-      include-message: always
+spring.ai.model.embedding: ollama
+spring.ai.vectorstore.pgvector.initialize-schema: true
+spring.ai.vectorstore.pgvector.schema-name: public
+spring.ai.vectorstore.pgvector.schema-validation: false
+spring.ai.vectorstore.pgvector.index-type: HNSW
+spring.ai.vectorstore.pgvector.distance-type: COSINE_DISTANCE
+spring.ai.vectorstore.pgvector.max-document-batch-size: 10000
 
-  # PostgreSQL configuration used when cache.type=postgres
-  datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/embeddings}
-    username: ${DB_USER:embeddings}
-    password: ${DB_PASSWORD:embeddings}
+spring.ai.ollama.base-url: ${OLLAMA_BASE_URL:http://172.16.115.105:11434}
+spring.ai.ollama.embedding.options.model: ${OLLAMA_DEFAULT_MODEL:nomic-embed-text}
+spring.ai.ollama.init.pull-model-strategy: never
+spring.ai.ollama.init.timeout: ${OLLAMA_INIT_TIMEOUT:30s}
 
 # Actuator Configuration
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,metrics,prometheus
-  metrics:
-    tags:
-      application: ${spring.application.name}
+management.endpoints.web.exposure.include: health,metrics,prometheus
+management.metrics.tags.application: ${spring.application.name}
 
-logging:
-  level:
-    org.lareferencia.embedding: DEBUG
+logging.pattern.level: "%5p [requestId:%X{requestId}]"
+logging.level.org.lareferencia.embedding: INFO
+logging.level.org.springframework.ai: INFO

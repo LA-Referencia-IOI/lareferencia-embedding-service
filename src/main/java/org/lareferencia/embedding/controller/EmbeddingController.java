@@ -1,38 +1,38 @@
 package org.lareferencia.embedding.controller;
 
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
-import org.lareferencia.embedding.dto.EmbeddingRequest;
-import org.lareferencia.embedding.dto.EmbeddingResponse;
+import jakarta.validation.Valid;
+
+import org.lareferencia.embedding.dto.GenerateEmbeddingsRequest;
+import org.lareferencia.embedding.dto.GenerateEmbeddingsResponse;
 import org.lareferencia.embedding.service.EmbeddingService;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
+
 @RestController
 @RequestMapping("/api/v1/embeddings")
 @RequiredArgsConstructor
-@Tag(name = "Embedding Generation", description = "Endpoints for generating and retrieving embeddings with caching")
+@Tag(name = "Embeddings", description = "Generate embeddings with store-aware persistent caching")
 public class EmbeddingController {
 
     private final EmbeddingService embeddingService;
 
-    @Operation(summary = "Generate or retrieve embeddings", description = "Takes a single string or a list of strings and returns embeddings following the OpenAI API contract. Results are cached.")
+    @Operation(summary = "Generate embeddings", description = "Generates embeddings for a single text or a batch of texts using the model configured for the selected store. Cached vectors are returned when available.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Embeddings generated or reused successfully"),
+            @ApiResponse(responseCode = "400", description = "Invalid request payload"),
+            @ApiResponse(responseCode = "404", description = "Store not found"),
+            @ApiResponse(responseCode = "502", description = "Ollama provider failure")
+    })
     @PostMapping
-    public ResponseEntity<EmbeddingResponse> generateEmbedding(@RequestBody EmbeddingRequest request) {
-        if (request == null || request.input() == null || request.model() == null || request.model().trim().isEmpty()) {
-            return ResponseEntity.badRequest().build();
-        }
-
-        var inputs = request.inputs();
-        if (inputs.isEmpty()) {
-            return ResponseEntity.badRequest().build();
-        }
-
-        EmbeddingResponse response = embeddingService.getEmbeddings(inputs, request.model());
-        return ResponseEntity.ok(response);
+    public GenerateEmbeddingsResponse generateEmbedding(@Valid @RequestBody GenerateEmbeddingsRequest request) {
+        return embeddingService.generateEmbeddings(request);
     }
 }

@@ -1,91 +1,158 @@
 package org.lareferencia.embedding.service;
 
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.TextNode;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.lareferencia.embedding.cache.EmbeddingCache;
-import org.lareferencia.embedding.client.EmbeddingClient;
-import org.lareferencia.embedding.dto.EmbeddingResponse;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.lareferencia.embedding.config.ApplicationProperties;
+import org.lareferencia.embedding.dto.GenerateEmbeddingsRequest;
+import org.lareferencia.embedding.dto.GenerateEmbeddingsResponse;
+import org.lareferencia.embedding.entity.EmbeddingStoreEntity;
+import org.lareferencia.embedding.repository.EmbeddingRepository;
+import org.lareferencia.embedding.util.PerKeyLockManager;
 import org.lareferencia.embedding.util.TextNormalizer;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.List;
-import java.util.Optional;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.*;
-
+@ExtendWith(MockitoExtension.class)
 class EmbeddingServiceTest {
 
-    private EmbeddingCache cache;
-    private EmbeddingClient client;
-    private MeterRegistry meterRegistry;
-    private TextNormalizer textNormalizer;
-    private EmbeddingService service;
+        @Mock
+        private StoreService storeService;
 
-    @BeforeEach
-    void setUp() {
-        cache = mock(EmbeddingCache.class);
-        client = mock(EmbeddingClient.class);
-        meterRegistry = new SimpleMeterRegistry();
-        textNormalizer = new TextNormalizer();
-        service = new EmbeddingService(cache, client, meterRegistry, textNormalizer);
-    }
+        @Mock
+        private EmbeddingRepository embeddingRepository;
 
-    @Test
-    void testGetEmbeddings_CacheMiss() {
-        String input = "hello world";
-        String model = "test-model";
-        List<Double> mockEmbedding = List.of(0.1, 0.2, 0.3);
+        @Mock
+        private EmbeddingProviderRegistry embeddingProviderRegistry;
 
-        when(cache.get(anyString())).thenReturn(Optional.empty());
-        when(client.generateEmbeddings(eq(List.of(input)), eq(model))).thenReturn(List.of(mockEmbedding));
+        @Mock
+        private EmbeddingProviderService embeddingProviderService;
 
-        EmbeddingResponse response = service.getEmbeddings(List.of(input), model);
+        private HashService hashService;
+        private MeterRegistry meterRegistry;
+        private TextNormalizer textNormalizer;
+        private ApplicationProperties applicationProperties;
+        private EmbeddingService service;
 
-        assertNotNull(response);
-        assertEquals(model, response.model());
-        assertEquals("list", response.object());
-        assertEquals(1, response.data().size());
-        assertEquals(mockEmbedding, response.data().get(0).embedding());
-        assertEquals(0, response.data().get(0).index());
-        assertEquals("embedding", response.data().get(0).object());
+        @BeforeEach
+        void setUp() {
+                hashService = new HashService();
+                meterRegistry = new SimpleMeterRegistry();
+                textNormalizer = new TextNormalizer();
+                applicationProperties = new ApplicationProperties();
+                applicationProperties.setMaxBatchSize(8);
+                applicationProperties.setMaxInputLength(2000);
+                service = new EmbeddingService(
+                                storeService,
+                                embeddingRepository,
+                                hashService,
+                                embeddingProviderRegistry,
+                                meterRegistry,
+                                textNormalizer,
+                                applicationProperties,
+                                new PerKeyLockManager());
+                when(embeddingProviderRegistry.getDefaultProvider()).thenReturn(embeddingProviderService);
+        }
 
-        verify(client, times(1)).generateEmbeddings(anyList(), eq(model));
-        verify(cache, times(1)).put(anyString(), eq(mockEmbedding));
+        @Test
+        void generatesAndCachesMissingEmbeddings() {
+                EmbeddingStoreEntity store = store(1L, "publications", "nomic-embed-text");
+                String normalizedText = textNormalizer.normalize("Machine learning applied to repositories");
+                String hash = hashService.hash(normalizedText);
 
-        assertEquals(1, meterRegistry.counter("embedding.cache.misses", "model", model).count());
-    }
+                when(storeService.getRequiredStore(1L)).thenReturn(store);
+                when(storeService.ensureEmbeddingDimensions(store, 3)).thenReturn(3);
+                when(embeddingRepository.findByHashes(eq(1L), eq(null), anyCollection()))
+                                .thenReturn(Map.of())
+                                .thenReturn(Map.of());
+                when(embeddingProviderService.embed(List.of(normalizedText), "nomic-embed-text"))
+                                .thenReturn(List.of(new float[] { 0.1f, 0.2f, 0.3f }));
 
-    @Test
-    void testGetEmbeddings_MixedCacheAndGeneration() {
-        String input1 = "cached";
-        String input2 = "missing";
-        String model = "test-model";
-        List<Double> embedding1 = List.of(0.1);
-        List<Double> embedding2 = List.of(0.2);
+                GenerateEmbeddingsResponse response = service.generateEmbeddings(
+                                new GenerateEmbeddingsRequest(1L,
+                                                new TextNode("Machine learning applied to repositories")));
 
-        // Mock first call (input1) as hit, second call (input2) as miss
-        when(cache.get(anyString())).thenReturn(Optional.of(embedding1), Optional.empty());
+                assertNotNull(response);
+                assertEquals(1L, response.storeId());
+                assertEquals("publications", response.storeName());
+                assertEquals("nomic-embed-text", response.model());
+                assertEquals(1, response.data().size());
+                assertEquals(List.of(0.10000000149011612d, 0.20000000298023224d, 0.30000001192092896d),
+                                response.data().get(0).embedding());
 
-        when(client.generateEmbeddings(eq(List.of("missing")), eq(model))).thenReturn(List.of(embedding2));
+                verify(embeddingProviderService, times(1)).embed(List.of(normalizedText), "nomic-embed-text");
+                verify(embeddingRepository).saveEmbeddings(eq(1L), eq(3), argThat(map -> map.size() == 1
+                                && Arrays.equals(map.get(hash), new float[] { 0.1f, 0.2f, 0.3f })));
+        }
 
-        EmbeddingResponse response = service.getEmbeddings(List.of(input1, input2), model);
+        @Test
+        void reusesCachedEmbeddingsAndDeduplicatesMissingTexts() {
+                EmbeddingStoreEntity store = store(10L, "publications", "nomic-embed-text");
+                String repeatedText = textNormalizer.normalize("cached text");
+                String missingText = textNormalizer.normalize("missing text");
+                String cachedHash = hashService.hash(repeatedText);
+                String missingHash = hashService.hash(missingText);
 
-        assertNotNull(response);
-        assertEquals(2, response.data().size());
-        // Verify order preservation and indices
-        assertEquals(embedding1, response.data().get(0).embedding());
-        assertEquals(0, response.data().get(0).index());
-        assertEquals(embedding2, response.data().get(1).embedding());
-        assertEquals(1, response.data().get(1).index());
+                Map<String, float[]> firstLookup = new LinkedHashMap<>();
+                firstLookup.put(cachedHash, new float[] { 0.9f, 0.1f });
+                store.setEmbeddingDimensions(2);
 
-        verify(client, times(1)).generateEmbeddings(eq(List.of("missing")), eq(model));
-        verify(cache, times(1)).put(anyString(), eq(embedding2));
+                when(storeService.getRequiredStore(10L)).thenReturn(store);
+                when(storeService.ensureEmbeddingDimensions(store, 2)).thenReturn(2);
+                when(embeddingRepository.findByHashes(eq(10L), eq(2), anyCollection()))
+                                .thenReturn(firstLookup)
+                                .thenReturn(Map.of());
+                when(embeddingProviderService.embed(List.of(missingText), "nomic-embed-text"))
+                                .thenReturn(List.of(new float[] { 0.2f, 0.4f }));
 
-        assertEquals(1, meterRegistry.counter("embedding.cache.hits", "model", model).count());
-        assertEquals(1, meterRegistry.counter("embedding.cache.misses", "model", model).count());
-    }
+                GenerateEmbeddingsResponse response = service.generateEmbeddings(
+                                new GenerateEmbeddingsRequest(10L, JsonNodeFactory.instance.arrayNode()
+                                                .add("cached text")
+                                                .add("cached text")
+                                                .add("missing text")));
+
+                assertNotNull(response);
+                assertEquals(3, response.data().size());
+                assertEquals(List.of(0.8999999761581421d, 0.10000000149011612d), response.data().get(0).embedding());
+                assertEquals(List.of(0.8999999761581421d, 0.10000000149011612d), response.data().get(1).embedding());
+                assertEquals(List.of(0.20000000298023224d, 0.4000000059604645d), response.data().get(2).embedding());
+
+                verify(embeddingProviderService, times(1)).embed(List.of(missingText), "nomic-embed-text");
+                verify(embeddingRepository).saveEmbeddings(eq(10L), eq(2), argThat(map -> map.size() == 1
+                                && map.containsKey(missingHash)
+                                && Arrays.equals(map.get(missingHash), new float[] { 0.2f, 0.4f })));
+                verify(embeddingRepository, never()).saveEmbeddings(eq(10L), eq(2),
+                                argThat(map -> map.containsKey(cachedHash)));
+        }
+
+        private EmbeddingStoreEntity store(Long id, String name, String model) {
+                return EmbeddingStoreEntity.builder()
+                                .id(id)
+                                .name(name)
+                                .model(model)
+                                .createdAt(Instant.now())
+                                .build();
+        }
 }

@@ -1,27 +1,39 @@
-{"properties": [
-  {
-    "name": "cache.type",
-    "type": "java.lang.String",
-    "description": "A description for 'cache.type'"
-  },
-  {
-    "name": "embedding.provider-url",
-    "type": "java.lang.String",
-    "description": "A description for 'embedding.provider-url'"
-  },
-  {
-    "name": "embedding.timeout-ms",
-    "type": "java.lang.String",
-    "description": "A description for 'embedding.timeout-ms'"
-  },
-  {
-    "name": "cache.rocksdb.path",
-    "type": "java.lang.String",
-    "description": "A description for 'cache.rocksdb.path'"
-  },
-  {
-    "name": "cache.sqlite.path",
-    "type": "java.lang.String",
-    "description": "A description for 'cache.sqlite.path'"
-  }
-]}
+{
+  "properties": [
+    {
+      "name": "app.embedding.max-batch-size",
+      "type": "java.lang.Integer",
+      "description": "Maximum number of inputs accepted in a single embeddings request."
+    },
+    {
+      "name": "app.embedding.max-input-length",
+      "type": "java.lang.Integer",
+      "description": "Maximum number of characters allowed per input text."
+    },
+    {
+      "name": "app.embedding.provider.connect-timeout",
+      "type": "java.time.Duration",
+      "description": "Timeout used to establish the HTTP connection to the embedding provider."
+    },
+    {
+      "name": "app.embedding.provider.request-timeout",
+      "type": "java.time.Duration",
+      "description": "Maximum time allowed for a synchronous embedding request to complete."
+    },
+    {
+      "name": "spring.ai.ollama.base-url",
+      "type": "java.lang.String",
+      "description": "Base URL for the Ollama server used by Spring AI."
+    },
+    {
+      "name": "spring.ai.ollama.embedding.options.model",
+      "type": "java.lang.String",
+      "description": "Default Ollama embedding model used by Spring AI."
+    },
+    {
+      "name": "spring.ai.ollama.init.timeout",
+      "type": "java.time.Duration",
+      "description": "How long Spring AI waits for Ollama model initialization or auto-pull to complete."
+    }
+  ]
+}

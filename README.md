@@ -8,6 +8,8 @@ A high-performance, deterministic embedding cache microservice designed to elimi
 - **Text Normalization (v1):** Applied before hashing to prevent minor formatting discrepancies (spaces, line breaks, etc.) from causing cache misses.
 - **OpenAI API Compatible:** Implements the standard OpenAI embedding response contract for seamless integration with existing AI tools.
 - **Batch Support:** Handles single strings or arrays of strings in a single request, preserving original input order.
+- **Spring AI Native Embeddings:** Uses Spring AI's `EmbeddingModel` API as the provider-neutral abstraction for embedding generation.
+- **Dimension-Aware PGvector Tables:** Defers per-store pgvector table creation until the first embedding is generated, then creates the table with the model's actual vector dimensions.
 - **Pluggable Storage:** Supports **PostgreSQL** with **pgvector**, **RocksDB**, or **SQLite**, selectable at runtime.
 - **Read-Only Endpoints:** Easily query available provider models and perform direct cache lookups.
 
@@ -15,7 +17,7 @@ A high-performance, deterministic embedding cache microservice designed to elimi
 
 ## 🛠️ Requirements
 
-- **Java 17+**
+- **Java 21+**
 - **Maven 3.9+**
 - **PostgreSQL 16+** with the [pgvector](https://github.com/pgvector/pgvector) extension installed when `CACHE_TYPE=postgres`.
 - Native RocksDB support when `CACHE_TYPE=rocksdb`.
@@ -73,6 +75,23 @@ If using PostgreSQL, ensure the `pgvector` extension is enabled:
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
+
+The repository now uses Spring AI's `PgVectorStore` builder for PostgreSQL-backed stores. The relevant configuration lives under `spring.ai.vectorstore.pgvector`:
+
+```yaml
+spring:
+  ai:
+    vectorstore:
+      pgvector:
+        initialize-schema: true
+        schema-name: public
+        schema-validation: false
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        max-document-batch-size: 10000
+```
+
+`schema-validation` is intentionally disabled because this service creates per-store tables lazily on first use. Identifier safety is enforced in the repository before native SQL is issued.
 
 If using RocksDB instead, create the target directory or let the service create it automatically:
 
