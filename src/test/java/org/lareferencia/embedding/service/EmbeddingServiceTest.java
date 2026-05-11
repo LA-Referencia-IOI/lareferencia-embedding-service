@@ -45,10 +45,7 @@ class EmbeddingServiceTest {
         private EmbeddingRepository embeddingRepository;
 
         @Mock
-        private EmbeddingProviderRegistry embeddingProviderRegistry;
-
-        @Mock
-        private EmbeddingProviderService embeddingProviderService;
+        private OllamaEmbeddingService ollamaEmbeddingService;
 
         private HashService hashService;
         private MeterRegistry meterRegistry;
@@ -68,12 +65,11 @@ class EmbeddingServiceTest {
                                 storeService,
                                 embeddingRepository,
                                 hashService,
-                                embeddingProviderRegistry,
+                                ollamaEmbeddingService,
                                 meterRegistry,
                                 textNormalizer,
                                 applicationProperties,
                                 new PerKeyLockManager());
-                when(embeddingProviderRegistry.getDefaultProvider()).thenReturn(embeddingProviderService);
         }
 
         @Test
@@ -87,9 +83,8 @@ class EmbeddingServiceTest {
                 when(embeddingRepository.findByHashes(eq(1L), eq(null), anyCollection()))
                                 .thenReturn(Map.of())
                                 .thenReturn(Map.of());
-                when(embeddingProviderService.embed(List.of(normalizedText), "nomic-embed-text"))
+                when(ollamaEmbeddingService.embed(List.of(normalizedText), "nomic-embed-text"))
                                 .thenReturn(List.of(new float[] { 0.1f, 0.2f, 0.3f }));
-
                 GenerateEmbeddingsResponse response = service.generateEmbeddings(
                                 new GenerateEmbeddingsRequest(1L,
                                                 new TextNode("Machine learning applied to repositories")));
@@ -102,7 +97,7 @@ class EmbeddingServiceTest {
                 assertEquals(List.of(0.10000000149011612d, 0.20000000298023224d, 0.30000001192092896d),
                                 response.data().get(0).embedding());
 
-                verify(embeddingProviderService, times(1)).embed(List.of(normalizedText), "nomic-embed-text");
+                verify(ollamaEmbeddingService, times(1)).embed(List.of(normalizedText), "nomic-embed-text");
                 verify(embeddingRepository).saveEmbeddings(eq(1L), eq(3), argThat(map -> map.size() == 1
                                 && Arrays.equals(map.get(hash), new float[] { 0.1f, 0.2f, 0.3f })));
         }
@@ -124,7 +119,7 @@ class EmbeddingServiceTest {
                 when(embeddingRepository.findByHashes(eq(10L), eq(2), anyCollection()))
                                 .thenReturn(firstLookup)
                                 .thenReturn(Map.of());
-                when(embeddingProviderService.embed(List.of(missingText), "nomic-embed-text"))
+                when(ollamaEmbeddingService.embed(List.of(missingText), "nomic-embed-text"))
                                 .thenReturn(List.of(new float[] { 0.2f, 0.4f }));
 
                 GenerateEmbeddingsResponse response = service.generateEmbeddings(
@@ -139,7 +134,7 @@ class EmbeddingServiceTest {
                 assertEquals(List.of(0.8999999761581421d, 0.10000000149011612d), response.data().get(1).embedding());
                 assertEquals(List.of(0.20000000298023224d, 0.4000000059604645d), response.data().get(2).embedding());
 
-                verify(embeddingProviderService, times(1)).embed(List.of(missingText), "nomic-embed-text");
+                verify(ollamaEmbeddingService, times(1)).embed(List.of(missingText), "nomic-embed-text");
                 verify(embeddingRepository).saveEmbeddings(eq(10L), eq(2), argThat(map -> map.size() == 1
                                 && map.containsKey(missingHash)
                                 && Arrays.equals(map.get(missingHash), new float[] { 0.2f, 0.4f })));

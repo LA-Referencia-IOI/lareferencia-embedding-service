@@ -17,24 +17,17 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class OllamaEmbeddingService implements EmbeddingProviderService {
+public class OllamaEmbeddingService {
 
   private static final String DIMENSION_PROBE_TEXT = "dimension probe";
+  private static final String OLLAMA_PROVIDER = "ollama";
   private static final String OLLAMA_EMBEDDINGS_PATH = "/api/embed";
-  private static final String PROVIDER_NAME = "ollama";
-
   private final EmbeddingModel embeddingModel;
   private final OllamaConnectionDetails ollamaConnectionDetails;
 
-  @Override
-  public String providerName() {
-    return PROVIDER_NAME;
-  }
-
-  @Override
   public List<float[]> embed(List<String> inputs, String model) {
     try {
-      log.info("Calling external embedding provider provider={} model={} inputs={}", providerName(), model,
+      log.info("Calling external embedding provider provider={} model={} inputs={}", OLLAMA_PROVIDER, model,
           inputs.size());
       EmbeddingResponse response = embeddingModel.call(new EmbeddingRequest(
           inputs,
@@ -48,33 +41,32 @@ public class OllamaEmbeddingService implements EmbeddingProviderService {
         throw new EmbeddingProviderException(
             "Embedding model returned " + embeddings.size() + " embeddings for " + inputs.size() + " inputs");
       }
-      log.info("External embedding provider returned provider={} model={} embeddings={}", providerName(), model,
+      log.info("External embedding provider returned provider={} model={} embeddings={}", OLLAMA_PROVIDER, model,
           embeddings.size());
       return embeddings;
     } catch (EmbeddingProviderException exception) {
       log.error("External embedding provider returned an application error provider={} model={} message={}",
-          providerName(),
+          OLLAMA_PROVIDER,
           model,
           exception.getMessage());
       throw exception;
     } catch (RuntimeException exception) {
       String providerMessage = resolveProviderMessage(exception);
-      log.error("External embedding provider call failed provider={} model={} message={}", providerName(), model,
+      log.error("External embedding provider call failed provider={} model={} message={}", OLLAMA_PROVIDER, model,
           providerMessage, exception);
       throw new EmbeddingProviderException(providerMessage, exception);
     }
   }
 
-  @Override
   public int resolveDimensions(String model) {
-    log.info("Resolving embedding dimensions from provider provider={} model={}", providerName(), model);
+    log.info("Resolving embedding dimensions from provider provider={} model={}", OLLAMA_PROVIDER, model);
     List<float[]> embeddings = embed(List.of(DIMENSION_PROBE_TEXT), model);
     if (embeddings.isEmpty() || embeddings.get(0) == null || embeddings.get(0).length == 0) {
       throw new EmbeddingProviderException(
           "Embedding provider returned an empty embedding while probing model " + model);
     }
     int dimensions = embeddings.get(0).length;
-    log.info("Resolved embedding dimensions from provider provider={} model={} dimensions={}", providerName(), model,
+    log.info("Resolved embedding dimensions from provider provider={} model={} dimensions={}", OLLAMA_PROVIDER, model,
         dimensions);
     return dimensions;
   }

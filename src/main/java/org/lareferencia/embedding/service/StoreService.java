@@ -23,7 +23,7 @@ import lombok.extern.slf4j.Slf4j;
 public class StoreService {
 
   private final StoreRepository storeRepository;
-  private final EmbeddingProviderRegistry embeddingProviderRegistry;
+  private final OllamaEmbeddingService ollamaEmbeddingService;
   private final EmbeddingRepository embeddingRepository;
 
   @Transactional
@@ -35,7 +35,7 @@ public class StoreService {
       throw new StoreAlreadyExistsException(normalizedName);
     }
 
-    int embeddingDimensions = embeddingProviderRegistry.getDefaultProvider().resolveDimensions(normalizedModel);
+    int embeddingDimensions = ollamaEmbeddingService.resolveDimensions(normalizedModel);
 
     EmbeddingStoreEntity savedStore = storeRepository.save(EmbeddingStoreEntity.builder()
         .name(normalizedName)

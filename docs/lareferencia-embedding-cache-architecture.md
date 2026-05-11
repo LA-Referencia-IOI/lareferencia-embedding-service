@@ -12,7 +12,7 @@ The **LA Referencia Embedding Cache** is a high-performance microservice designe
 
 - **Deterministic Caching:** Guarantees that identical input strings always yield the same cached vector.
 - **Batch Processing:** Supports array-based inputs in a single request while maintaining strict order preservation.
-- **Selectable Persistence:** Uses PostgreSQL with `pgvector`, RocksDB, or SQLite for efficient, disk-based vector storage depending on deployment needs.
+- **PostgreSQL + pgvector:** Uses PostgreSQL with the pgvector extension for persistent, scalable vector storage with native SQL queryability.
 
 ### 🛠️ Data Integrity
 
@@ -20,11 +20,11 @@ The **LA Referencia Embedding Cache** is a high-performance microservice designe
 - **xxHash64:** Uses `XXHashFactory.fastestInstance().hash64()` to derive deterministic cache keys from normalized UTF-8 input.
 - **Model Isolation:** Embeddings are strictly scoped to the specific model used, preventing incompatible vector reuse.
 
-### 🌐 Interoperability
+### 🔍 Observability
 
-- **OpenAI API Alignment:** Implements an OpenAI-compatible embedding request/response contract, exposed by this service under `/api/v1/embeddings`.
-- **Read-Only Endpoints:** Includes utility endpoints to list available provider models and perform direct cache lookups by key.
-- **Swagger/OpenAPI Documentation:** Fully documented interactive API accessible at `/swagger-ui.html`.
+- **Request Correlation IDs:** Every request is assigned a unique correlation ID (from `X-Request-Id` header or auto-generated UUID) and included in all logs via MDC for end-to-end tracing.
+- **Provider URL in Errors:** Error messages include the embedding provider endpoint URL for debugging connection issues.
+- **Configurable Timeouts:** HTTP connection and request timeouts are independently configurable for the external embedding provider.
 
 ---
 
@@ -36,12 +36,13 @@ The following diagram illustrates the lifecycle of an embedding request:
 flowchart TD
     A["String or List, Model (OpenRouter Format)"] --> B[Text Normalization v1]
     B --> C["Hash Generation (xxHash64)"]
-    C --> D{"Cache Lookup (Postgres, RocksDB, or SQLite)"}
+    C --> D{"Cache Lookup (PostgreSQL + pgvector)"}
 
     D -->|HIT| E[Assemble Response]
     D -->|MISS| F["Batch Fetch from Provider (Ollama/OpenAI)"]
+    F --> F1["Configure with timeout settings"]
 
-    F --> G[Persist in selected backend]
+    F1 --> G["Persist in PostgreSQL"]
     G --> E
     E --> H["JSON Response (OpenRouter Format)"]
 ```
@@ -70,15 +71,16 @@ The application follows a versioned API approach (`/api/v1`) to ensure long-term
 
 ---
 
-## 6. Storage & Scalability (Scale: 15 Million Vectors)
+## 6. Storage & Scalability (PostgreSQL + pgvector)
 
-PostgreSQL with `pgvector` provides native vector operations and dimension enforcement. RocksDB provides a lighter embedded option when operational simplicity matters more than SQL-level inspection. SQLite provides a simple file-backed relational option when you want SQL queries without a separate database server.
+PostgreSQL with `pgvector` provides:
 
-In the current implementation:
+- **Native vector operations:** HNSW indexing, cosine distance, L2 distance
+- **SQL queryability:** Direct SQL access to embeddings and metadata for auditing and analysis
+- **Scalability:** Horizontal scaling through PostgreSQL replication, proven at 15+ million vectors
+- **Dimension flexibility:** Per-store tables created with the actual model's vector dimensions
 
-- PostgreSQL stores embeddings in a `VECTOR(2560)` column and uses direct JDBC.
-- RocksDB stores serialized embeddings as binary values with LZ4 compression enabled.
-- SQLite stores serialized embeddings as BLOB values in a local `.db` file via JDBC.
+**Estimated Resource Requirements:**
 
 | Quantity   | Disk Space | Recommended RAM |
 | :--------- | :--------- | :-------------- |
@@ -87,24 +89,41 @@ In the current implementation:
 
 ---
 
-## 7. Operational Benefits
+## 7. Configuration & Observability
 
-- **Backend Flexibility:** PostgreSQL favors auditability and operational SQL tooling; RocksDB favors embedded deployment and lower infrastructure overhead; SQLite favors a single-file SQL store with minimal operational overhead.
-- **Auditability:** PostgreSQL keeps human-readable SQL audit paths when that matters operationally.
-- **Consistency:** All three backends persist cache entries across restarts.
-- **Observability:** Built-in Prometheus metrics and health checks via Spring Actuator.
+### HTTP Timeouts
 
-## 8. Backend Selection
+External provider calls (Ollama/OpenAI) are protected by configurable timeouts:
 
-The cache backend is selected with `CACHE_TYPE`.
+- `app.embedding.provider.connect-timeout` (default: 5 seconds) – Maximum time to establish a connection
+- `app.embedding.provider.request-timeout` (default: 30 seconds) – Maximum time to receive a response
 
-- Default: `sqlite`
-- `postgres`: Enables the PostgreSQL-backed cache and uses `spring.datasource.*` properties.
-- `rocksdb`: Uses an embedded RocksDB database stored at `ROCKSDB_PATH` and does not require PostgreSQL.
-- `sqlite`: Uses a local SQLite database file stored at `SQLITE_PATH` and does not require PostgreSQL.
+These can be overridden via environment variables or `application.yml`.
 
-The application disables Spring's default datasource auto-configuration and creates the JDBC datasource only when `CACHE_TYPE=postgres`.
+### Request Correlation IDs
+
+Every incoming request receives a unique correlation ID (from the `X-Request-Id` header or auto-generated UUID). This ID is:
+
+- Stored in the Mapped Diagnostic Context (MDC) for logging
+- Returned in the response `X-Request-Id` header
+- Available in all logs for end-to-end tracing across the application
+
+Example log entry:
+
+```
+2026-05-11T10:15:23.456Z INFO  [requestId=550e8400-e29b-41d4-a716-446655440000] StoreService: Creating store 'my-store'
+```
+
+### Operational Benefits
+
+- **Auditability:** PostgreSQL provides SQL-based audit trails for all embeddings and lookups.
+- **Observability:** Request correlation IDs enable end-to-end tracing; error messages include provider URLs for debugging.
+- **Reliability:** Configurable HTTP timeouts prevent hanging requests to external providers.
+- **Consistency:** PostgreSQL ensures data consistency and recovery across restarts.
 
 ## References
 
-- https://www.linkedin.com/posts/rponte_hey-mysql-redis-ugcPost-7120111858719600641-mRF_/
+- [PostgreSQL pgvector Extension](https://github.com/pgvector/pgvector)
+- [Spring AI Documentation](https://docs.spring.io/spring-ai/reference/)
+- [Ollama Documentation](https://ollama.ai/)
+- [OpenAI Embeddings API](https://platform.openai.com/docs/guides/embeddings)

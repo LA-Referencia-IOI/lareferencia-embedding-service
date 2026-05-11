@@ -3,6 +3,7 @@ server.error.include-message: always
 
 app.embedding.max-batch-size: ${EMBEDDING_MAX_BATCH_SIZE:128}
 app.embedding.max-input-length: ${EMBEDDING_MAX_INPUT_LENGTH:8192}
+
 app.embedding.provider.connect-timeout: ${OLLAMA_CONNECT_TIMEOUT:5s}
 app.embedding.provider.request-timeout: ${OLLAMA_REQUEST_TIMEOUT:30s}
 

@@ -10,7 +10,10 @@ A high-performance, deterministic embedding cache microservice designed to elimi
 - **Batch Support:** Handles single strings or arrays of strings in a single request, preserving original input order.
 - **Spring AI Native Embeddings:** Uses Spring AI's `EmbeddingModel` API as the provider-neutral abstraction for embedding generation.
 - **Dimension-Aware PGvector Tables:** Defers per-store pgvector table creation until the first embedding is generated, then creates the table with the model's actual vector dimensions.
-- **Pluggable Storage:** Supports **PostgreSQL** with **pgvector**, **RocksDB**, or **SQLite**, selectable at runtime.
+- **PostgreSQL + pgvector:** Persistent, scalable vector storage with built-in SQL queryability and auditability.
+- **Request Correlation IDs:** Automatic request tracing via MDC for end-to-end observability across logs.
+- **HTTP Timeouts:** Configurable connection and request timeouts for external embedding providers.
+- **Provider Abstraction:** Extensible interface for multiple embedding provider implementations.
 - **Read-Only Endpoints:** Easily query available provider models and perform direct cache lookups.
 
 ---
@@ -19,30 +22,26 @@ A high-performance, deterministic embedding cache microservice designed to elimi
 
 - **Java 21+**
 - **Maven 3.9+**
-- **PostgreSQL 16+** with the [pgvector](https://github.com/pgvector/pgvector) extension installed when `CACHE_TYPE=postgres`.
-- Native RocksDB support when `CACHE_TYPE=rocksdb`.
-- Native SQLite support when `CACHE_TYPE=sqlite`.
+- **PostgreSQL 16+** with the [pgvector](https://github.com/pgvector/pgvector) extension installed.
 - **Embedding Provider:** An upstream API such as [Ollama](https://ollama.com/) or any OpenAI-compatible embedding service.
 
 ---
 
 ## ⚙️ Configuration
 
-The application is configured via environment variables. Default values are provided for local development.
+The application is configured via environment variables or `application.yml`. Default values are provided for local development.
 
-| Variable                 | Description                                       | Default                                       |
-| :----------------------- | :------------------------------------------------ | :-------------------------------------------- |
-| `SERVER_PORT`            | Port the application runs on                      | `8080`                                        |
-| `EMBEDDING_PROVIDER_URL` | Upstream embedding API endpoint                   | `http://172.16.115.105:11434/v1/embeddings`   |
-| `CACHE_TYPE`             | Cache backend: `postgres`, `rocksdb`, or `sqlite` | `sqlite`                                      |
-| `ROCKSDB_PATH`           | Filesystem path for RocksDB data                  | `./data/rocksdb/embedding-cache`              |
-| `SQLITE_PATH`            | Filesystem path for SQLite database               | `./data/sqlite/embedding-cache.db`            |
-| `DB_URL`                 | PostgreSQL connection string                      | `jdbc:postgresql://localhost:5432/embeddings` |
-| `DB_USER`                | Database username                                 | `embeddings`                                  |
-| `DB_PASSWORD`            | Database password                                 | `embeddings`                                  |
-
-When `CACHE_TYPE=rocksdb` or `CACHE_TYPE=sqlite`, PostgreSQL settings are ignored.
-The current default backend is SQLite.
+| Variable/Property                                       | Description                           | Default                                       |
+| :------------------------------------------------------ | :------------------------------------ | :-------------------------------------------- |
+| `SERVER_PORT` / `server.port`                           | Port the application runs on          | `8080`                                        |
+| `EMBEDDING_PROVIDER_URL` / `app.embedding.provider.url` | Upstream embedding API endpoint       | `http://localhost:11434/api/embed`            |
+| `DB_URL` / `spring.datasource.url`                      | PostgreSQL connection string          | `jdbc:postgresql://localhost:5432/embeddings` |
+| `DB_USER` / `spring.datasource.username`                | Database username                     | `embeddings`                                  |
+| `DB_PASSWORD` / `spring.datasource.password`            | Database password                     | `embeddings`                                  |
+| `app.embedding.provider.connect-timeout`                | HTTP connection timeout (seconds)     | `5`                                           |
+| `app.embedding.provider.request-timeout`                | HTTP request timeout (seconds)        | `30`                                          |
+| `app.embedding.max-batch-size`                          | Maximum strings per embedding request | `100`                                         |
+| `app.embedding.max-input-length`                        | Maximum characters per input string   | `8192`                                        |
 
 ---
 
@@ -54,12 +53,12 @@ The following diagram illustrates the lifecycle of an embedding request:
 flowchart TD
     A["String or List, Model (OpenRouter Format)"] --> B[Text Normalization v1]
     B --> C["Hash Generation (xxHash64)"]
-    C --> D{"Cache Lookup (Postgres, RocksDB, or SQLite)"}
+    C --> D{"Cache Lookup (PostgreSQL + pgvector)"}
 
     D -->|HIT| E[Assemble Response]
     D -->|MISS| F["Batch Fetch from Provider (Ollama/OpenAI)"]
 
-    F --> G[Persist in selected backend]
+    F --> G[Persist in PostgreSQL with pgvector]
     G --> E
     E --> H["JSON Response (OpenRouter Format)"]
 ```
@@ -70,44 +69,31 @@ flowchart TD
 
 ### 1. Database Setup
 
-If using PostgreSQL, ensure the `pgvector` extension is enabled:
+Ensure the `pgvector` extension is enabled in PostgreSQL:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-The repository now uses Spring AI's `PgVectorStore` builder for PostgreSQL-backed stores. The relevant configuration lives under `spring.ai.vectorstore.pgvector`:
+The application uses PostgreSQL for persistent vector storage with per-store tables created dynamically on first use. Tables are named `embeddings_<storeId>` and store vectors in `VECTOR` columns matching the model's embedding dimensions.
+
+**Connection Configuration** (via environment or `application.yml`):
+
+```bash
+export DB_URL="jdbc:postgresql://localhost:5432/embeddings"
+export DB_USER="embeddings"
+export DB_PASSWORD="embeddings"
+```
+
+Or in `application.yml`:
 
 ```yaml
 spring:
-  ai:
-    vectorstore:
-      pgvector:
-        initialize-schema: true
-        schema-name: public
-        schema-validation: false
-        index-type: HNSW
-        distance-type: COSINE_DISTANCE
-        max-document-batch-size: 10000
+  datasource:
+    url: jdbc:postgresql://localhost:5432/embeddings
+    username: embeddings
+    password: embeddings
 ```
-
-`schema-validation` is intentionally disabled because this service creates per-store tables lazily on first use. Identifier safety is enforced in the repository before native SQL is issued.
-
-If using RocksDB instead, create the target directory or let the service create it automatically:
-
-```bash
-export CACHE_TYPE=rocksdb
-export ROCKSDB_PATH=./data/rocksdb/embedding-cache
-```
-
-If using SQLite instead, point the service at a local database file:
-
-```bash
-export CACHE_TYPE=sqlite
-export SQLITE_PATH=./data/sqlite/embedding-cache.db
-```
-
-SQLite is the current default in `application.yml`, so no extra database setup is required for local startup unless you want Postgres or RocksDB.
 
 ### 2. Run the Application
 
@@ -197,4 +183,5 @@ Includes tests for:
 
 - **Text Normalizer:** Verifies formatting rules (trimming, Unicode normalization, etc.).
 - **Embedding Service:** Ensures cache-hit logic and order preservation for batch requests.
-- **Cache Backends:** Verifies backend selection and read/write behavior for PostgreSQL, RocksDB, and SQLite.
+- **Store Service:** Validates store creation, dimension probing, and table naming.
+- **PostgreSQL Integration:** Verifies pgvector storage and retrieval operations.

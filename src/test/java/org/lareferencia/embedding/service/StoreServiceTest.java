@@ -31,10 +31,7 @@ class StoreServiceTest {
   private StoreRepository storeRepository;
 
   @Mock
-  private EmbeddingProviderRegistry embeddingProviderRegistry;
-
-  @Mock
-  private EmbeddingProviderService embeddingProviderService;
+  private OllamaEmbeddingService ollamaEmbeddingService;
 
   @Mock
   private EmbeddingRepository embeddingRepository;
@@ -43,14 +40,13 @@ class StoreServiceTest {
 
   @BeforeEach
   void setUp() {
-    storeService = new StoreService(storeRepository, embeddingProviderRegistry, embeddingRepository);
+    storeService = new StoreService(storeRepository, ollamaEmbeddingService, embeddingRepository);
   }
 
   @Test
   void createsStoreAfterValidatingModelAndAllocatingEmbeddingTable() {
-    when(embeddingProviderRegistry.getDefaultProvider()).thenReturn(embeddingProviderService);
     when(storeRepository.existsByNameIgnoreCase("publications")).thenReturn(false);
-    when(embeddingProviderService.resolveDimensions("nomic-embed-text")).thenReturn(768);
+    when(ollamaEmbeddingService.resolveDimensions("nomic-embed-text")).thenReturn(768);
     when(storeRepository.save(any(EmbeddingStoreEntity.class))).thenReturn(EmbeddingStoreEntity.builder()
         .id(7L)
         .name("publications")
@@ -64,7 +60,7 @@ class StoreServiceTest {
     assertEquals(7L, response.id());
     assertEquals("publications", response.name());
     assertEquals("nomic-embed-text", response.model());
-    verify(embeddingProviderService).resolveDimensions("nomic-embed-text");
+    verify(ollamaEmbeddingService).resolveDimensions("nomic-embed-text");
     verify(embeddingRepository).ensureStoreTableExists(7L, 768);
   }
 
@@ -78,9 +74,8 @@ class StoreServiceTest {
 
   @Test
   void doesNotCreateStoreWhenProviderRejectsModel() {
-    when(embeddingProviderRegistry.getDefaultProvider()).thenReturn(embeddingProviderService);
     when(storeRepository.existsByNameIgnoreCase("publications")).thenReturn(false);
-    when(embeddingProviderService.resolveDimensions("missing-model"))
+    when(ollamaEmbeddingService.resolveDimensions("missing-model"))
         .thenThrow(new EmbeddingProviderException("model 'missing-model' not found"));
 
     assertThrows(EmbeddingProviderException.class,

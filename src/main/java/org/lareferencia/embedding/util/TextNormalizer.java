@@ -1,8 +1,10 @@
 package org.lareferencia.embedding.util;
 
-import org.springframework.stereotype.Component;
-
 import java.text.Normalizer;
+import java.util.Locale;
+import java.util.regex.Pattern;
+
+import org.springframework.stereotype.Component;
 
 /**
  * Utility component for text normalization.
@@ -13,35 +15,28 @@ public class TextNormalizer {
 
     public static final String VERSION = "v1";
 
-    /**
-     * Normalizes the input text according to version v1 rules:
-     * - Trim leading and trailing whitespace.
-     * - Normalize Unicode characters (NFC).
-     * - Collapse multiple spaces into one.
-     * - Replace repeated line breaks with a single space.
-     * - Preserve case.
-     * - Preserve accents and diacritics.
-     *
-     * @param input the raw text to normalize
-     * @return the normalized text
-     */
+    // Precompiling patterns saves CPU on bulk processing
+    private static final Pattern LINE_BREAKS = Pattern.compile("[\\n\\r]+");
+    private static final Pattern MULTIPLE_SPACES = Pattern.compile("\\s+");
+
     public String normalize(String input) {
-        if (input == null) {
-            return null;
+        if (input == null || input.isBlank()) {
+            return input;
         }
 
-        // TODO: Do we normalize case-sensitive values to lowercase?
+        // 1. Quick initial cleanup (Reduces String size for heavy steps)
+        String normalized = input.trim();
 
-        // 1. Unicode Normalization (NFC)
-        String normalized = Normalizer.normalize(input, Normalizer.Form.NFC);
+        // 2. Replace line breaks with spaces
+        normalized = LINE_BREAKS.matcher(normalized).replaceAll(" ");
 
-        // 2. Replace all line breaks and carriage returns with a single space
-        normalized = normalized.replaceAll("[\\n\\r]+", " ");
+        // 3. Collapse multiple spaces
+        normalized = MULTIPLE_SPACES.matcher(normalized).replaceAll(" ");
 
-        // 3. Collapse multiple spaces (and other whitespace) into a single space
-        normalized = normalized.replaceAll("\\s+", " ");
+        // 4. Unicode Normalization (NFC) - Guarantees "ç" vs "c + ̧"
+        normalized = Normalizer.normalize(normalized, Normalizer.Form.NFC);
 
-        // 4. Trim leading and trailing whitespace
-        return normalized.trim();
+        // 5. Deterministic case-insensitive
+        return normalized.toLowerCase(Locale.ROOT);
     }
 }

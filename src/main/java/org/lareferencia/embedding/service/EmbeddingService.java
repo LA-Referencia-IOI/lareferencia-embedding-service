@@ -34,7 +34,7 @@ public class EmbeddingService {
     private final StoreService storeService;
     private final EmbeddingRepository embeddingRepository;
     private final HashService hashService;
-    private final EmbeddingProviderRegistry embeddingProviderRegistry;
+    private final OllamaEmbeddingService ollamaEmbeddingService;
     private final MeterRegistry meterRegistry;
     private final TextNormalizer textNormalizer;
     private final ApplicationProperties applicationProperties;
@@ -121,7 +121,7 @@ public class EmbeddingService {
                             store.getModel(),
                             unresolvedByHash.size());
                     Timer.Sample sample = Timer.start(meterRegistry);
-                    List<float[]> generatedEmbeddings = embeddingProviderRegistry.getDefaultProvider()
+                    List<float[]> generatedEmbeddings = ollamaEmbeddingService
                             .embed(List.copyOf(unresolvedByHash.values()), store.getModel());
                     sample.stop(generationLatencyTimer(store));
 
