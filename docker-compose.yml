@@ -1,29 +1,57 @@
-version: '3.8'
-
 services:
-  redis:
-    image: redis:7-alpine
-    container_name: embedding-redis
+  # Default local development service.
+  # CACHE_TYPE can be sqlite, rocksdb, or postgres.
+  # For postgres, start Compose with: docker compose --profile postgres up
+  app:
+    image: maven:3.9.9-eclipse-temurin-17
+    container_name: embedding-cache-app
+    working_dir: /workspace
+    command: ./mvnw spring-boot:run
+    environment:
+      SERVER_PORT: ${SERVER_PORT:-8080}
+      EMBEDDING_PROVIDER_URL: ${EMBEDDING_PROVIDER_URL:-http://host.docker.internal:11434/v1/embeddings}
+      EMBEDDING_TIMEOUT_MS: ${EMBEDDING_TIMEOUT_MS:-10000}
+      CACHE_TYPE: ${CACHE_TYPE:-sqlite}
+      SQLITE_PATH: ${SQLITE_PATH:-/data/sqlite/embedding-cache.db}
+      ROCKSDB_PATH: ${ROCKSDB_PATH:-/data/rocksdb/embedding-cache}
+      DB_URL: ${DB_URL:-jdbc:postgresql://postgres:5432/embeddings}
+      DB_USER: ${DB_USER:-embeddings}
+      DB_PASSWORD: ${DB_PASSWORD:-embeddings}
     ports:
-      - "6379:6379"
+      - "${SERVER_PORT:-8080}:8080"
+    volumes:
+      - ./:/workspace
+      - maven-cache:/root/.m2
+      - app-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg16
     container_name: embedding-postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: embeddings
+      POSTGRES_USER: ${DB_USER:-embeddings}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-embeddings}
+      POSTGRES_DB: ${POSTGRES_DB:-embeddings}
     ports:
       - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USER:-embeddings} -d ${POSTGRES_DB:-embeddings}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
+    profiles:
+      - postgres
 
-  # Optional: Ollama local instance for testing
-  # ollama:
-  #   image: ollama/ollama
-  #   container_name: ollama
-  #   ports:
-  #     - "11434:11434"
-  #   volumes:
-  #     - ./ollama_data:/root/.ollama
+volumes:
+  app-data:
+  maven-cache:
+  postgres-data:
