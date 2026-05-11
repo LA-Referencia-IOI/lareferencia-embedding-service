@@ -6,7 +6,7 @@ embedding:
   timeout-ms: ${EMBEDDING_TIMEOUT_MS:10000}
 
 cache:
-  type: ${CACHE_TYPE:sqlite} # Options: rocksdb, postgres, sqlite
+  type: ${CACHE_TYPE:rocksdb} # Options: rocksdb, postgres, sqlite
   rocksdb:
     path: ${ROCKSDB_PATH:./data/rocksdb/embedding-cache}
   sqlite:

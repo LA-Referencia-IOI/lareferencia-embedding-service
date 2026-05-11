@@ -1,62 +1,62 @@
-Para um cenário, onde você precisa gerenciar desde pequenos caches (100 mil vetores) até um volume massivo de 15 milhões (150 GB), a escolha entre **SQLite** e **RocksDB** depende de quanto você prioriza a **facilidade de desenvolvimento (SQL)** versus a **performance bruta de escrita/leitura (Key-Value)**.
+# SQLite vs RocksDB
 
-Ambos são **embarcados** (não exigem servidor) e **persistentes**. Aqui está o comparativo detalhado:
+For a scenario ranging from small caches (100 thousand vectors) to a massive volume of 15 million (150 GB), the choice between **SQLite** and **RocksDB** depends on how much you prioritize **development simplicity (SQL)** versus **raw read/write performance (key-value)**.
+
+Both are **embedded** (they do not require a server) and **persistent**. Here is the detailed comparison:
 
 ---
 
-## 1. SQLite (implementação atual do projeto)
+## 1. SQLite
 
-No estado atual do projeto, o SQLite é usado como um banco relacional embarcado em arquivo único, acessado por JDBC. Os embeddings são armazenados como `BLOB`, não com uma extensão vetorial como `sqlite-vec`.
+SQLite is used as an embedded relational database in a single file, accessed through JDBC. Embeddings are stored as `BLOB` values.
 
-### ✅ Vantagens
+### Advantages
 
-- **Facilidade de Uso (SQL):** Você usa a sintaxe que já conhece. Pode fazer `SELECT embedding FROM embeddings WHERE hash_key = ?`.
-- **Ecossistema Java:** Integração via JDBC é padrão e muito estável.
-- **Gerenciamento:** O banco é um arquivo `.db`. Mover, copiar ou fazer backup é um simples comando `cp`.
-- **Flexibilidade:** Se no futuro você precisar adicionar colunas extras (como `source_url` ou `last_accessed`), é um simples `ALTER TABLE`.
+- **Ease of Use (SQL):** You use syntax you already know. You can run `SELECT embedding FROM embeddings WHERE hash_key = ?`.
+- **Java Ecosystem:** JDBC integration is standard and very stable.
+- **Management:** The database is a `.db` file. Moving, copying, or backing it up is as simple as running `cp`.
+- **Flexibility:** If you need to add extra columns in the future, such as `source_url` or `last_accessed`, it is just an `ALTER TABLE`.
 
-### ❌ Desvantagens
+### Disadvantages
 
-- **Performance em Escala:** Em 15 milhões de registros, o índice B-Tree do SQLite pode ficar mais lento que o RocksDB para buscas por ID.
-- **Concorrência de Escrita:** O SQLite trava o arquivo para escrita. Como a implementação atual não configura `WAL`, múltiplas escritas concorrentes podem se tornar gargalo mais cedo (erro `database is locked`).
-- **Overhead do SQL:** O parser de SQL adiciona uma pequena latência em comparação ao acesso direto a bytes.
+- **Performance at Scale:** At 15 million records, SQLite's B-tree index may become slower than RocksDB for key lookups.
+- **Write Concurrency:** SQLite locks the file for writes. Since the current implementation does not configure `WAL`, multiple concurrent writes can become a bottleneck earlier, with errors such as `database is locked`.
+- **SQL Overhead:** The SQL parser adds a small amount of latency compared to direct byte access.
 
 ---
 
 ## 2. RocksDB
 
-O RocksDB é uma biblioteca de armazenamento Key-Value de altíssima performance, otimizada para SSDs.
+RocksDB is a very high-performance key-value storage library optimized for SSDs.
 
-### ✅ Vantagens
+### Advantages
 
-- **Escalabilidade Massiva:** Foi feito para lidar com bilhões de chaves. Para os seus 15 milhões de vetores, ele nem "sua".
-- **Performance de Escrita (LSM-Tree):** É muito mais rápido que o SQLite para inserir dados, pois transforma escritas aleatórias em sequenciais no disco.
-- **Compressão Nativa:** O projeto atualmente já habilita compressão LZ4, reduzindo espaço em disco sem complicar o uso da API.
-- **Eficiência para cache bruto:** Como o acesso é `get(key)` e `put(key, value)`, ele combina bem com o padrão atual do serviço.
+- **Massive Scalability:** It was built to handle billions of keys. For 15 million vectors, it is comfortably within its intended scale.
+- **Write Performance (LSM-Tree):** It is much faster than SQLite for inserts because it turns random writes into sequential disk writes.
+- **Native Compression:** The project already enables LZ4 compression, reducing disk usage without complicating the API.
+- **Efficiency for raw cache access:** Since access is `get(key)` and `put(key, value)`, it fits the service's current pattern well.
 
-### ❌ Desvantagens
+### Disadvantages
 
-- **Complexidade no Java:** Requer o uso de JNI (Java Native Interface). A API é baseada em `byte[]`, então a aplicação precisa serializar/deserializar manualmente os embeddings.
-- **Opacidade:** Não há uma interface visual fácil para ver os dados. Você não consegue abrir um "DBeaver" e dar um `SELECT` facilmente sem ferramentas específicas.
-- **Falta de SQL:** É estritamente `get(key)` e `put(key, value)`. Se precisar de filtros complexos no futuro, terá que implementar a lógica na aplicação.
-
----
-
-## Comparativo de Performance por Cenário
-
-| Cenário                   | SQLite                  | RocksDB              | Veredito                                   |
-| ------------------------- | ----------------------- | -------------------- | ------------------------------------------ |
-| **Pequeno (100k - 2M)**   | **Excelente**           | Muito Bom            | O SQLite é mais prático aqui.              |
-| **Massivo (15M / 150GB)** | Médio (Pode sofrer I/O) | **Excelente**        | RocksDB gerencia melhor o arquivo gigante. |
-| **Escritas Paralelas**    | Baixo (Fila de espera)  | **Muito Alto**       | RocksDB é imbatível em ingestão.           |
-| **Desenvolvimento**       | Rápido (JDBC/SQL)       | Lento (Manual Bytes) | SQLite ganha em produtividade.             |
+- **Complexity in Java:** It requires JNI (Java Native Interface). The API is based on `byte[]`, so the application must manually serialize and deserialize embeddings.
+- **Opacity:** There is no easy visual interface for inspecting the data. You cannot simply open DBeaver and run a `SELECT` without specific tooling.
+- **Lack of SQL:** It is strictly `get(key)` and `put(key, value)`. If you need more complex filtering in the future, that logic must be implemented in the application.
 
 ---
 
-## Qual escolher para o seu projeto?
+## Performance Comparison by Scenario
 
-Se o seu fluxo de trabalho mensal de indexação for **altamente paralelo** (muitos processos requisitando e salvando vetores ao mesmo tempo), o **RocksDB** é a escolha técnica correta para evitar travamentos de arquivo.
+| Scenario                  | SQLite                  | RocksDB               | Verdict                                |
+| ------------------------- | ----------------------- | --------------------- | -------------------------------------- |
+| **Small (100k - 2M)**     | **Excellent**           | Very Good             | SQLite is more practical here.         |
+| **Massive (15M / 150GB)** | Medium (May suffer I/O) | **Excellent**         | RocksDB handles the large file better. |
+| **Parallel Writes**       | Low (Queueing)          | **Very High**         | RocksDB is unmatched for ingestion.    |
+| **Development**           | Fast (JDBC/SQL)         | Slower (Manual Bytes) | SQLite wins on productivity.           |
 
-No entanto, se você valoriza a **simplicidade** e quer um backend local sem servidor, o **SQLite** é hoje a opção mais simples no projeto. Para volumes maiores, ele continua viável, mas a ausência de `WAL` e o modelo de escrita serializado devem ser considerados antes de usá-lo como backend principal de ingestão pesada.
+---
 
-> **Dica Pro:** Como você está em Java, o **RocksDB** é frequentemente usado como o motor de cache de alto nível (como no Kafka Streams). Se você não tem medo de manipular `ByteBuffer`, ele é a solução definitiva para o problema dos 150 GB.
+## Which One Should You Choose for Your Project?
+
+If your monthly indexing workflow is **highly parallel** with many processes requesting and storing vectors at the same time, **RocksDB** is the technically correct choice to avoid file locking issues.
+
+However, if you value **simplicity** and want a local backend without a server, **SQLite** is currently the simplest option in the project. For larger volumes, it is still viable, but the lack of `WAL` and the serialized write model should be considered before using it as the primary backend for heavy ingestion.
