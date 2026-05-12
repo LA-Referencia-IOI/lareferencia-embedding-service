@@ -13,7 +13,7 @@ import jakarta.validation.ValidatorFactory;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-class CreateStoreRequestTest {
+class CreateStorageRequestTest {
 
   private static Validator validator;
 
@@ -24,22 +24,22 @@ class CreateStoreRequestTest {
   }
 
   @Test
-  void allowsSpacesInStoreName() {
-    CreateStoreRequest request = new CreateStoreRequest("qwen3 embedding 4b", "nomic-embed-text");
+  void allowsSpacesInStorageName() {
+    CreateStorageRequest request = new CreateStorageRequest("qwen3 embedding 4b", "nomic-embed-text");
 
-    Set<ConstraintViolation<CreateStoreRequest>> violations = validator.validate(request);
+    Set<ConstraintViolation<CreateStorageRequest>> violations = validator.validate(request);
 
     assertTrue(violations.isEmpty());
   }
 
   @Test
-  void rejectsUnsupportedCharactersInStoreName() {
-    CreateStoreRequest request = new CreateStoreRequest("qwen3.embedding.4b", "nomic-embed-text");
+  void rejectsUnsupportedCharactersInStorageName() {
+    CreateStorageRequest request = new CreateStorageRequest("qwen3.embedding.4b", "nomic-embed-text");
 
-    Set<ConstraintViolation<CreateStoreRequest>> violations = validator.validate(request);
+    Set<ConstraintViolation<CreateStorageRequest>> violations = validator.validate(request);
 
     assertEquals(1, violations.size());
-    assertEquals("Store name may only contain letters, numbers, spaces, hyphens, and underscores",
+    assertEquals("Storage name may only contain letters, numbers, spaces, hyphens, and underscores",
         violations.iterator().next().getMessage());
   }
 }

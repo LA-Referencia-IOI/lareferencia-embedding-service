@@ -4,7 +4,7 @@ services:
   # For postgres, start Compose with: docker compose --profile postgres up
   app:
     image: maven:3.9.9-eclipse-temurin-17
-    container_name: embedding-cache-app
+    container_name: lareferencia-embedding-service
     working_dir: /workspace
     command: ./mvnw spring-boot:run
     environment:
@@ -12,8 +12,6 @@ services:
       EMBEDDING_PROVIDER_URL: ${EMBEDDING_PROVIDER_URL:-http://host.docker.internal:11434/v1/embeddings}
       EMBEDDING_TIMEOUT_MS: ${EMBEDDING_TIMEOUT_MS:-10000}
       CACHE_TYPE: ${CACHE_TYPE:-sqlite}
-      SQLITE_PATH: ${SQLITE_PATH:-/data/sqlite/embedding-cache.db}
-      ROCKSDB_PATH: ${ROCKSDB_PATH:-/data/rocksdb/embedding-cache}
       DB_URL: ${DB_URL:-jdbc:postgresql://postgres:5432/embeddings}
       DB_USER: ${DB_USER:-embeddings}
       DB_PASSWORD: ${DB_PASSWORD:-embeddings}

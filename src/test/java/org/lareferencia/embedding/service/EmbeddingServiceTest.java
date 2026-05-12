@@ -2,7 +2,9 @@ package org.lareferencia.embedding.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -15,6 +17,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.TextNode;
@@ -25,7 +28,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.lareferencia.embedding.config.ApplicationProperties;
 import org.lareferencia.embedding.dto.GenerateEmbeddingsRequest;
 import org.lareferencia.embedding.dto.GenerateEmbeddingsResponse;
-import org.lareferencia.embedding.entity.EmbeddingStoreEntity;
+import org.lareferencia.embedding.entity.StorageEntity;
+import org.lareferencia.embedding.exception.EmbeddingProviderException;
 import org.lareferencia.embedding.repository.EmbeddingRepository;
 import org.lareferencia.embedding.util.PerKeyLockManager;
 import org.lareferencia.embedding.util.TextNormalizer;
@@ -38,14 +42,18 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 @ExtendWith(MockitoExtension.class)
 class EmbeddingServiceTest {
 
+        private static final UUID STORE_ID_1 = UUID.fromString("11111111-1111-1111-1111-111111111111");
+        private static final UUID STORE_ID_10 = UUID.fromString("10101010-1010-1010-1010-101010101010");
+        private static final UUID STORE_ID_20 = UUID.fromString("20202020-2020-2020-2020-202020202020");
+
         @Mock
-        private StoreService storeService;
+        private StorageService storageService;
 
         @Mock
         private EmbeddingRepository embeddingRepository;
 
         @Mock
-        private OllamaEmbeddingService ollamaEmbeddingService;
+        private EmbeddingProviderService ollamaEmbeddingService;
 
         private HashService hashService;
         private MeterRegistry meterRegistry;
@@ -62,7 +70,7 @@ class EmbeddingServiceTest {
                 applicationProperties.setMaxBatchSize(8);
                 applicationProperties.setMaxInputLength(2000);
                 service = new EmbeddingService(
-                                storeService,
+                                storageService,
                                 embeddingRepository,
                                 hashService,
                                 ollamaEmbeddingService,
@@ -74,37 +82,46 @@ class EmbeddingServiceTest {
 
         @Test
         void generatesAndCachesMissingEmbeddings() {
-                EmbeddingStoreEntity store = store(1L, "publications", "nomic-embed-text");
+                StorageEntity storage = storage(STORE_ID_1, "publications", "nomic-embed-text");
                 String normalizedText = textNormalizer.normalize("Machine learning applied to repositories");
                 String hash = hashService.hash(normalizedText);
 
-                when(storeService.getRequiredStore(1L)).thenReturn(store);
-                when(storeService.ensureEmbeddingDimensions(store, 3)).thenReturn(3);
-                when(embeddingRepository.findByHashes(eq(1L), eq(null), anyCollection()))
+                when(storageService.getRequiredStorage(STORE_ID_1)).thenReturn(storage);
+                when(storageService.ensureEmbeddingDimensions(storage, 3)).thenReturn(3);
+                when(embeddingRepository.findByHashes(eq(STORE_ID_1), eq(null), anyCollection()))
                                 .thenReturn(Map.of())
                                 .thenReturn(Map.of());
                 when(ollamaEmbeddingService.embed(List.of(normalizedText), "nomic-embed-text"))
-                                .thenReturn(List.of(new float[] { 0.1f, 0.2f, 0.3f }));
+                                .thenReturn(new EmbeddingProviderService.EmbeddingBatchResult(
+                                                List.of(new float[] { 0.1f, 0.2f, 0.3f }),
+                                                "ollama",
+                                                new EmbeddingProviderService.UsageData(8, 8)));
+                when(ollamaEmbeddingService.provider()).thenReturn("ollama");
                 GenerateEmbeddingsResponse response = service.generateEmbeddings(
-                                new GenerateEmbeddingsRequest(1L,
+                                new GenerateEmbeddingsRequest(STORE_ID_1,
                                                 new TextNode("Machine learning applied to repositories")));
 
                 assertNotNull(response);
-                assertEquals(1L, response.storeId());
-                assertEquals("publications", response.storeName());
+                assertEquals(STORE_ID_1, response.storageId());
+                assertEquals("publications", response.storageName());
+                assertEquals("list", response.object());
                 assertEquals("nomic-embed-text", response.model());
+                assertEquals("ollama", response.provider());
+                assertEquals(8, response.usage().promptTokens());
+                assertEquals(8, response.usage().totalTokens());
                 assertEquals(1, response.data().size());
+                assertEquals("embedding", response.data().get(0).object());
                 assertEquals(List.of(0.10000000149011612d, 0.20000000298023224d, 0.30000001192092896d),
                                 response.data().get(0).embedding());
 
                 verify(ollamaEmbeddingService, times(1)).embed(List.of(normalizedText), "nomic-embed-text");
-                verify(embeddingRepository).saveEmbeddings(eq(1L), eq(3), argThat(map -> map.size() == 1
+                verify(embeddingRepository).saveEmbeddings(eq(STORE_ID_1), eq(3), argThat(map -> map.size() == 1
                                 && Arrays.equals(map.get(hash), new float[] { 0.1f, 0.2f, 0.3f })));
         }
 
         @Test
         void reusesCachedEmbeddingsAndDeduplicatesMissingTexts() {
-                EmbeddingStoreEntity store = store(10L, "publications", "nomic-embed-text");
+                StorageEntity storage = storage(STORE_ID_10, "publications", "nomic-embed-text");
                 String repeatedText = textNormalizer.normalize("cached text");
                 String missingText = textNormalizer.normalize("missing text");
                 String cachedHash = hashService.hash(repeatedText);
@@ -112,38 +129,74 @@ class EmbeddingServiceTest {
 
                 Map<String, float[]> firstLookup = new LinkedHashMap<>();
                 firstLookup.put(cachedHash, new float[] { 0.9f, 0.1f });
-                store.setEmbeddingDimensions(2);
+                storage.setEmbeddingDimensions(2);
 
-                when(storeService.getRequiredStore(10L)).thenReturn(store);
-                when(storeService.ensureEmbeddingDimensions(store, 2)).thenReturn(2);
-                when(embeddingRepository.findByHashes(eq(10L), eq(2), anyCollection()))
+                when(storageService.getRequiredStorage(STORE_ID_10)).thenReturn(storage);
+                when(storageService.ensureEmbeddingDimensions(storage, 2)).thenReturn(2);
+                when(embeddingRepository.findByHashes(eq(STORE_ID_10), eq(2), anyCollection()))
                                 .thenReturn(firstLookup)
                                 .thenReturn(Map.of());
                 when(ollamaEmbeddingService.embed(List.of(missingText), "nomic-embed-text"))
-                                .thenReturn(List.of(new float[] { 0.2f, 0.4f }));
+                                .thenReturn(new EmbeddingProviderService.EmbeddingBatchResult(
+                                                List.of(new float[] { 0.2f, 0.4f }),
+                                                "ollama",
+                                                new EmbeddingProviderService.UsageData(5, 5)));
+                when(ollamaEmbeddingService.provider()).thenReturn("ollama");
 
                 GenerateEmbeddingsResponse response = service.generateEmbeddings(
-                                new GenerateEmbeddingsRequest(10L, JsonNodeFactory.instance.arrayNode()
+                                new GenerateEmbeddingsRequest(STORE_ID_10, JsonNodeFactory.instance.arrayNode()
                                                 .add("cached text")
                                                 .add("cached text")
                                                 .add("missing text")));
 
                 assertNotNull(response);
+                assertEquals("list", response.object());
+                assertEquals("ollama", response.provider());
+                assertEquals(5, response.usage().promptTokens());
+                assertEquals(5, response.usage().totalTokens());
                 assertEquals(3, response.data().size());
+                assertEquals("embedding", response.data().get(0).object());
+                assertEquals("embedding", response.data().get(1).object());
+                assertEquals("embedding", response.data().get(2).object());
                 assertEquals(List.of(0.8999999761581421d, 0.10000000149011612d), response.data().get(0).embedding());
                 assertEquals(List.of(0.8999999761581421d, 0.10000000149011612d), response.data().get(1).embedding());
                 assertEquals(List.of(0.20000000298023224d, 0.4000000059604645d), response.data().get(2).embedding());
 
                 verify(ollamaEmbeddingService, times(1)).embed(List.of(missingText), "nomic-embed-text");
-                verify(embeddingRepository).saveEmbeddings(eq(10L), eq(2), argThat(map -> map.size() == 1
+                verify(embeddingRepository).saveEmbeddings(eq(STORE_ID_10), eq(2), argThat(map -> map.size() == 1
                                 && map.containsKey(missingHash)
                                 && Arrays.equals(map.get(missingHash), new float[] { 0.2f, 0.4f })));
-                verify(embeddingRepository, never()).saveEmbeddings(eq(10L), eq(2),
+                verify(embeddingRepository, never()).saveEmbeddings(eq(STORE_ID_10), eq(2),
                                 argThat(map -> map.containsKey(cachedHash)));
         }
 
-        private EmbeddingStoreEntity store(Long id, String name, String model) {
-                return EmbeddingStoreEntity.builder()
+        @Test
+        void rejectsInconsistentEmbeddingDimensionsFromProvider() {
+                StorageEntity storage = storage(STORE_ID_20, "publications", "nomic-embed-text");
+                storage.setEmbeddingDimensions(2);
+
+                when(storageService.getRequiredStorage(STORE_ID_20)).thenReturn(storage);
+                when(embeddingRepository.findByHashes(eq(STORE_ID_20), eq(2), anyCollection()))
+                                .thenReturn(Map.of())
+                                .thenReturn(Map.of());
+                when(ollamaEmbeddingService.embed(
+                                List.of(textNormalizer.normalize("alpha"), textNormalizer.normalize("beta")),
+                                "nomic-embed-text"))
+                                .thenReturn(new EmbeddingProviderService.EmbeddingBatchResult(
+                                                List.of(new float[] { 0.1f, 0.2f }, new float[] { 0.3f }),
+                                                "ollama",
+                                                new EmbeddingProviderService.UsageData(0, 0)));
+                when(ollamaEmbeddingService.provider()).thenReturn("ollama");
+
+                assertThrows(EmbeddingProviderException.class,
+                                () -> service.generateEmbeddings(new GenerateEmbeddingsRequest(STORE_ID_20,
+                                                JsonNodeFactory.instance.arrayNode().add("alpha").add("beta"))));
+
+                verify(embeddingRepository, never()).saveEmbeddings(eq(STORE_ID_20), eq(2), anyMap());
+        }
+
+        private StorageEntity storage(UUID id, String name, String model) {
+                return StorageEntity.builder()
                                 .id(id)
                                 .name(name)
                                 .model(model)

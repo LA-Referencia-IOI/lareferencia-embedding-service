@@ -1,7 +1,6 @@
 package org.lareferencia.embedding.util;
 
 import java.text.Normalizer;
-import java.util.Locale;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
@@ -20,8 +19,11 @@ public class TextNormalizer {
     private static final Pattern MULTIPLE_SPACES = Pattern.compile("\\s+");
 
     public String normalize(String input) {
-        if (input == null || input.isBlank()) {
+        if (input == null) {
             return input;
+        }
+        if (input.isBlank()) {
+            return "";
         }
 
         // 1. Quick initial cleanup (Reduces String size for heavy steps)
@@ -34,9 +36,6 @@ public class TextNormalizer {
         normalized = MULTIPLE_SPACES.matcher(normalized).replaceAll(" ");
 
         // 4. Unicode Normalization (NFC) - Guarantees "ç" vs "c + ̧"
-        normalized = Normalizer.normalize(normalized, Normalizer.Form.NFC);
-
-        // 5. Deterministic case-insensitive
-        return normalized.toLowerCase(Locale.ROOT);
+        return Normalizer.normalize(normalized, Normalizer.Form.NFC);
     }
 }

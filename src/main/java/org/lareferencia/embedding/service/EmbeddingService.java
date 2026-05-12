@@ -7,11 +7,12 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import org.lareferencia.embedding.config.ApplicationProperties;
 import org.lareferencia.embedding.dto.GenerateEmbeddingsRequest;
 import org.lareferencia.embedding.dto.GenerateEmbeddingsResponse;
-import org.lareferencia.embedding.entity.EmbeddingStoreEntity;
+import org.lareferencia.embedding.entity.StorageEntity;
 import org.lareferencia.embedding.exception.EmbeddingProviderException;
 import org.lareferencia.embedding.exception.InvalidRequestException;
 import org.lareferencia.embedding.repository.EmbeddingRepository;
@@ -31,10 +32,10 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class EmbeddingService {
 
-    private final StoreService storeService;
+    private final StorageService storageService;
     private final EmbeddingRepository embeddingRepository;
     private final HashService hashService;
-    private final OllamaEmbeddingService ollamaEmbeddingService;
+    private final EmbeddingProviderService ollamaEmbeddingService;
     private final MeterRegistry meterRegistry;
     private final TextNormalizer textNormalizer;
     private final ApplicationProperties applicationProperties;
@@ -43,14 +44,19 @@ public class EmbeddingService {
     @Transactional
     public GenerateEmbeddingsResponse generateEmbeddings(GenerateEmbeddingsRequest request) {
         List<String> inputs = validateAndExtractInputs(request);
-        EmbeddingStoreEntity store = storeService.getRequiredStore(request.store());
-        log.info("Embedding request started storeId={} storeName={} model={} inputs={}",
-                store.getId(),
-                store.getName(),
-                store.getModel(),
+        StorageEntity storage = storageService.getRequiredStorage(request.model());
+        Counter cacheHitCounter = cacheHitCounter(storage);
+        Counter cacheMissCounter = cacheMissCounter(storage);
+        Counter generationCounter = generationCounter(storage);
+        Timer generationLatencyTimer = generationLatencyTimer(storage);
+
+        log.info("Embedding request started storageId={} storageName={} model={} inputs={}",
+                storage.getId(),
+                storage.getName(),
+                storage.getModel(),
                 inputs.size());
-        if (store.getEmbeddingDimensions() != null) {
-            embeddingRepository.ensureStoreTableExists(store.getId(), store.getEmbeddingDimensions());
+        if (storage.getEmbeddingDimensions() != null) {
+            embeddingRepository.ensureStorageTableExists(storage.getId(), storage.getEmbeddingDimensions());
         }
 
         List<String> normalizedInputs = inputs.stream()
@@ -61,9 +67,11 @@ public class EmbeddingService {
                 .map(hashService::hash)
                 .toList();
 
-        Map<String, float[]> cachedEmbeddings = embeddingRepository.findByHashes(store.getId(),
-                store.getEmbeddingDimensions(),
+        Map<String, float[]> cachedEmbeddings = embeddingRepository.findByHashes(storage.getId(),
+                storage.getEmbeddingDimensions(),
                 new LinkedHashSet<>(hashes));
+        String provider = ollamaEmbeddingService.provider();
+        GenerateEmbeddingsResponse.Usage usage = new GenerateEmbeddingsResponse.Usage(0, 0);
         List<float[]> results = new ArrayList<>(Collections.nCopies(inputs.size(), null));
         LinkedHashMap<String, String> missingByHash = new LinkedHashMap<>();
         int cacheHits = 0;
@@ -73,32 +81,32 @@ public class EmbeddingService {
             String hash = hashes.get(index);
             float[] cachedEmbedding = cachedEmbeddings.get(hash);
             if (cachedEmbedding != null) {
-                cacheHitCounter(store).increment();
+                cacheHitCounter.increment();
                 cacheHits++;
                 results.set(index, cachedEmbedding);
             } else {
-                cacheMissCounter(store).increment();
+                cacheMissCounter.increment();
                 cacheMisses++;
                 missingByHash.putIfAbsent(hash, normalizedInputs.get(index));
             }
         }
 
-        log.info("Cache lookup completed storeId={} model={} hits={} misses={} uniqueMisses={}",
-                store.getId(),
-                store.getModel(),
+        log.info("Cache lookup completed storageId={} model={} hits={} misses={} uniqueMisses={}",
+                storage.getId(),
+                storage.getModel(),
                 cacheHits,
                 cacheMisses,
                 missingByHash.size());
 
         if (!missingByHash.isEmpty()) {
             try (PerKeyLockManager.LockSet ignored = perKeyLockManager
-                    .lockAll(lockKeys(store.getId(), missingByHash.keySet()))) {
-                log.debug("Rechecking cache after lock storeId={} model={} hashes={}",
-                        store.getId(),
-                        store.getModel(),
+                    .lockAll(lockKeys(storage.getId(), missingByHash.keySet()))) {
+                log.debug("Rechecking cache after lock storageId={} model={} hashes={}",
+                        storage.getId(),
+                        storage.getModel(),
                         missingByHash.size());
-                Map<String, float[]> cachedAfterLock = embeddingRepository.findByHashes(store.getId(),
-                        store.getEmbeddingDimensions(),
+                Map<String, float[]> cachedAfterLock = embeddingRepository.findByHashes(storage.getId(),
+                        storage.getEmbeddingDimensions(),
                         missingByHash.keySet());
                 LinkedHashMap<String, String> unresolvedByHash = new LinkedHashMap<>();
                 Map<String, float[]> resolvedEmbeddings = new LinkedHashMap<>(cachedAfterLock);
@@ -109,42 +117,42 @@ public class EmbeddingService {
                     }
                 }
 
-                log.debug("Post-lock cache lookup completed storeId={} model={} resolvedAfterLock={} unresolved={}",
-                        store.getId(),
-                        store.getModel(),
+                log.debug("Post-lock cache lookup completed storageId={} model={} resolvedAfterLock={} unresolved={}",
+                        storage.getId(),
+                        storage.getModel(),
                         cachedAfterLock.size(),
                         unresolvedByHash.size());
 
                 if (!unresolvedByHash.isEmpty()) {
-                    log.info("Fetching embeddings from external provider storeId={} model={} inputs={}",
-                            store.getId(),
-                            store.getModel(),
+                    log.info("Fetching embeddings from external provider storageId={} model={} inputs={}",
+                            storage.getId(),
+                            storage.getModel(),
                             unresolvedByHash.size());
                     Timer.Sample sample = Timer.start(meterRegistry);
-                    List<float[]> generatedEmbeddings = ollamaEmbeddingService
-                            .embed(List.copyOf(unresolvedByHash.values()), store.getModel());
-                    sample.stop(generationLatencyTimer(store));
+                    EmbeddingProviderService.EmbeddingBatchResult generatedBatch = ollamaEmbeddingService
+                            .embed(List.copyOf(unresolvedByHash.values()), storage.getModel());
+                    sample.stop(generationLatencyTimer);
 
-                    if (generatedEmbeddings.size() != unresolvedByHash.size()) {
-                        throw new EmbeddingProviderException(
-                                "Ollama returned " + generatedEmbeddings.size() + " embeddings for "
-                                        + unresolvedByHash.size() + " inputs");
-                    }
+                    provider = generatedBatch.provider();
+                    usage = addUsage(usage, generatedBatch.usage());
 
-                    int embeddingDimensions = storeService.ensureEmbeddingDimensions(store,
-                            generatedEmbeddings.get(0).length);
+                    List<float[]> generatedEmbeddings = generatedBatch.embeddings();
+
+                    int embeddingDimensions = validateAndResolveGeneratedDimensions(generatedEmbeddings,
+                            unresolvedByHash.size(), storage);
+                    embeddingDimensions = storageService.ensureEmbeddingDimensions(storage, embeddingDimensions);
 
                     LinkedHashMap<String, float[]> generatedByHash = new LinkedHashMap<>();
                     int generatedIndex = 0;
                     for (String hash : unresolvedByHash.keySet()) {
                         generatedByHash.put(hash, generatedEmbeddings.get(generatedIndex++));
-                        generationCounter(store).increment();
+                        generationCounter.increment();
                     }
-                    log.debug("Persisting generated embeddings storeId={} model={} generated={}",
-                            store.getId(),
-                            store.getModel(),
+                    log.debug("Persisting generated embeddings storageId={} model={} generated={}",
+                            storage.getId(),
+                            storage.getModel(),
                             generatedByHash.size());
-                    embeddingRepository.saveEmbeddings(store.getId(), embeddingDimensions, generatedByHash);
+                    embeddingRepository.saveEmbeddings(storage.getId(), embeddingDimensions, generatedByHash);
                     resolvedEmbeddings.putAll(generatedByHash);
                 }
 
@@ -167,20 +175,65 @@ public class EmbeddingService {
             if (embedding == null) {
                 throw new IllegalStateException("Embedding result is missing at index " + index);
             }
-            data.add(new GenerateEmbeddingsResponse.EmbeddingData(index, toDoubleList(embedding)));
+            data.add(new GenerateEmbeddingsResponse.EmbeddingData("embedding", index, toDoubleList(embedding)));
         }
 
-        log.info("Embedding request finished storeId={} model={} outputs={}",
-                store.getId(),
-                store.getModel(),
+        log.info("Embedding request finished storageId={} model={} outputs={}",
+                storage.getId(),
+                storage.getModel(),
                 data.size());
 
-        return new GenerateEmbeddingsResponse(store.getId(), store.getName(), store.getModel(), data);
+        return new GenerateEmbeddingsResponse(
+                storage.getId(),
+                storage.getName(),
+                storage.getModel(),
+                provider,
+                "list",
+                data,
+                usage);
+    }
+
+    private GenerateEmbeddingsResponse.Usage addUsage(
+            GenerateEmbeddingsResponse.Usage existing,
+            EmbeddingProviderService.UsageData delta) {
+        return new GenerateEmbeddingsResponse.Usage(
+                existing.promptTokens() + delta.promptTokens(),
+                existing.totalTokens() + delta.totalTokens());
+    }
+
+    private int validateAndResolveGeneratedDimensions(
+            List<float[]> generatedEmbeddings,
+            int expectedSize,
+            StorageEntity storage) {
+        if (generatedEmbeddings.size() != expectedSize) {
+            throw new EmbeddingProviderException(
+                    "Ollama returned " + generatedEmbeddings.size() + " embeddings for " + expectedSize + " inputs");
+        }
+
+        int expectedDimensions = -1;
+        for (int index = 0; index < generatedEmbeddings.size(); index++) {
+            float[] embedding = generatedEmbeddings.get(index);
+            if (embedding == null || embedding.length == 0) {
+                throw new EmbeddingProviderException(
+                        "Ollama returned an empty embedding at index " + index + " for storage " + storage.getName());
+            }
+            if (expectedDimensions < 0) {
+                expectedDimensions = embedding.length;
+                continue;
+            }
+            if (embedding.length != expectedDimensions) {
+                throw new EmbeddingProviderException(
+                        "Ollama returned inconsistent embedding dimensions: " + embedding.length
+                                + " at index " + index + " (expected " + expectedDimensions + ")");
+            }
+        }
+
+        return expectedDimensions;
     }
 
     private List<String> validateAndExtractInputs(GenerateEmbeddingsRequest request) {
-        if (request.store() == null || request.store() <= 0) {
-            throw new InvalidRequestException("storeId must be a positive number");
+        if (request.model() == null) {
+            throw new InvalidRequestException("model (storageId) must be provided");
         }
 
         List<String> inputs = request.inputs();
@@ -206,8 +259,8 @@ public class EmbeddingService {
         return sanitizedInputs;
     }
 
-    private Collection<String> lockKeys(Long storeId, Collection<String> hashes) {
-        return hashes.stream().map(hash -> storeId + ":" + hash).toList();
+    private Collection<String> lockKeys(UUID storageId, Collection<String> hashes) {
+        return hashes.stream().map(hash -> storageId + ":" + hash).toList();
     }
 
     private List<Double> toDoubleList(float[] embedding) {
@@ -218,19 +271,22 @@ public class EmbeddingService {
         return values;
     }
 
-    private Counter cacheHitCounter(EmbeddingStoreEntity store) {
-        return meterRegistry.counter("embedding.cache.hits", "store", store.getName(), "model", store.getModel());
+    private Counter cacheHitCounter(StorageEntity storage) {
+        return meterRegistry.counter("embedding.cache.hits", "storage", storage.getName(), "model", storage.getModel());
     }
 
-    private Counter cacheMissCounter(EmbeddingStoreEntity store) {
-        return meterRegistry.counter("embedding.cache.misses", "store", store.getName(), "model", store.getModel());
+    private Counter cacheMissCounter(StorageEntity storage) {
+        return meterRegistry.counter("embedding.cache.misses", "storage", storage.getName(), "model",
+                storage.getModel());
     }
 
-    private Counter generationCounter(EmbeddingStoreEntity store) {
-        return meterRegistry.counter("embedding.generation.count", "store", store.getName(), "model", store.getModel());
+    private Counter generationCounter(StorageEntity storage) {
+        return meterRegistry.counter("embedding.generation.count", "storage", storage.getName(), "model",
+                storage.getModel());
     }
 
-    private Timer generationLatencyTimer(EmbeddingStoreEntity store) {
-        return meterRegistry.timer("embedding.generation.latency", "store", store.getName(), "model", store.getModel());
+    private Timer generationLatencyTimer(StorageEntity storage) {
+        return meterRegistry.timer("embedding.generation.latency", "storage", storage.getName(), "model",
+                storage.getModel());
     }
 }

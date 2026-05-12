@@ -63,11 +63,11 @@ To ensure deterministic hashing, the following rules are applied in order:
 
 ## 5. API Strategy
 
-The application follows a versioned API approach (`/api/v1`) to ensure long-term stability.
+The application follows a versioned API approach (`/api/v1`) to ensure long-term stability. Embedding generation is storage-scoped: callers first create a named storage (which resolves dimensions and creates the pgvector table), then submit embedding requests referencing the storage's UUID as the `model` field.
 
-- **`POST /api/v1/embeddings`**: Main entry point for generation/caching.
-- **`GET /api/v1/models`**: Proxies available models from the underlying provider.
-- **`GET /api/v1/embeddings/{key}`**: Direct retrieval for debugging and audit purposes.
+- **`POST /api/v1/storages`**: Create a named storage binding a model string to a dedicated pgvector table.
+- **`GET /api/v1/storages`**: List all registered storages.
+- **`POST /api/v1/embeddings`**: Main entry point for embedding generation/caching. The `model` field must be the UUID of an existing storage.
 
 ---
 
@@ -78,7 +78,7 @@ PostgreSQL with `pgvector` provides:
 - **Native vector operations:** HNSW indexing, cosine distance, L2 distance
 - **SQL queryability:** Direct SQL access to embeddings and metadata for auditing and analysis
 - **Scalability:** Horizontal scaling through PostgreSQL replication, proven at 15+ million vectors
-- **Dimension flexibility:** Per-store tables created with the actual model's vector dimensions
+- **Dimension flexibility:** Per-storage tables created with the actual model's vector dimensions
 
 **Estimated Resource Requirements:**
 
@@ -104,14 +104,14 @@ These can be overridden via environment variables or `application.yml`.
 
 Every incoming request receives a unique correlation ID (from the `X-Request-Id` header or auto-generated UUID). This ID is:
 
-- Stored in the Mapped Diagnostic Context (MDC) for logging
+- Storaged in the Mapped Diagnostic Context (MDC) for logging
 - Returned in the response `X-Request-Id` header
 - Available in all logs for end-to-end tracing across the application
 
 Example log entry:
 
 ```
-2026-05-11T10:15:23.456Z INFO  [requestId=550e8400-e29b-41d4-a716-446655440000] StoreService: Creating store 'my-store'
+2026-05-11T10:15:23.456Z INFO  [requestId=550e8400-e29b-41d4-a716-446655440000] StorageService: Creating storage 'my-storage'
 ```
 
 ### Operational Benefits
@@ -124,6 +124,6 @@ Example log entry:
 ## References
 
 - [PostgreSQL pgvector Extension](https://github.com/pgvector/pgvector)
-- [Spring AI Documentation](https://docs.spring.io/spring-ai/reference/)
+- [Ollama API Documentation](https://github.com/ollama/ollama/blob/main/docs/api.md)
 - [Ollama Documentation](https://ollama.ai/)
 - [OpenAI Embeddings API](https://platform.openai.com/docs/guides/embeddings)

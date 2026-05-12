@@ -13,6 +13,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -48,16 +49,16 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.BAD_REQUEST, "Constraint violation", request, details);
     }
 
-    @ExceptionHandler(StoreNotFoundException.class)
-    public ResponseEntity<ApiErrorResponse> handleStoreNotFound(
-            StoreNotFoundException ex,
+    @ExceptionHandler(StorageNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleStorageNotFound(
+            StorageNotFoundException ex,
             HttpServletRequest request) {
         return buildResponse(HttpStatus.NOT_FOUND, ex.getMessage(), request, List.of());
     }
 
-    @ExceptionHandler(StoreAlreadyExistsException.class)
-    public ResponseEntity<ApiErrorResponse> handleDuplicateStore(
-            StoreAlreadyExistsException ex,
+    @ExceptionHandler(StorageAlreadyExistsException.class)
+    public ResponseEntity<ApiErrorResponse> handleDuplicateStorage(
+            StorageAlreadyExistsException ex,
             HttpServletRequest request) {
         return buildResponse(HttpStatus.CONFLICT, ex.getMessage(), request, List.of());
     }
@@ -77,13 +78,21 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.BAD_GATEWAY, ex.getMessage(), request, List.of());
     }
 
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleMissingRoute(
+            NoResourceFoundException ex,
+            HttpServletRequest request) {
+        return buildResponse(HttpStatus.NOT_FOUND, "Resource not found", request, List.of(ex.getMessage()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpected(
             Exception ex,
             HttpServletRequest request) {
         log.error("Unexpected application error path={} message={}", request.getRequestURI(), ex.getMessage(), ex);
+        String detail = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
         return buildResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected internal error", request,
-                List.of(ex.getMessage()));
+                List.of(detail));
     }
 
     private ResponseEntity<ApiErrorResponse> buildResponse(

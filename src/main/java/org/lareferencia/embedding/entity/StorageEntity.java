@@ -1,6 +1,7 @@
 package org.lareferencia.embedding.entity;
 
 import java.time.Instant;
+import java.util.UUID;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -19,23 +20,26 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "embedding_stores", uniqueConstraints = @UniqueConstraint(name = "uk_embedding_store_name", columnNames = "name"), indexes = @Index(name = "idx_embedding_store_name", columnList = "name"))
+@Table(name = "storages", uniqueConstraints = @UniqueConstraint(name = "uk_storage_name", columnNames = "name"), indexes = @Index(name = "idx_storage_name", columnList = "name"))
 @Getter
 @Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class EmbeddingStoreEntity {
+public class StorageEntity {
 
   @Id
-  @GeneratedValue(strategy = GenerationType.IDENTITY)
-  private Long id;
+  @GeneratedValue(strategy = GenerationType.UUID)
+  private UUID id;
 
-  @Column(name = "name", nullable = false, length = 100)
+  @Column(name = "name", nullable = false, length = 60)
   private String name;
 
-  @Column(name = "model", nullable = false, length = 200)
+  @Column(name = "model", nullable = false, length = 60)
   private String model;
+
+  @Column(name = "provider", nullable = false, length = 20)
+  private String provider;
 
   @Column(name = "embedding_dimensions")
   private Integer embeddingDimensions;

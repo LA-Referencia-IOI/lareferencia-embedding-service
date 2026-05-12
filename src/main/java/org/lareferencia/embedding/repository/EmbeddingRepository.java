@@ -7,16 +7,16 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.stream.Collectors;
 
 import com.pgvector.PGvector;
 
-import org.lareferencia.embedding.config.PgVectorStoreProperties;
-import org.lareferencia.embedding.service.StoreTableNamingService;
-import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.vectorstore.pgvector.PgVectorStore;
+import org.lareferencia.embedding.config.PgVectorStorageProperties;
+import org.lareferencia.embedding.service.StorageTableNamingService;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
@@ -32,22 +32,28 @@ public class EmbeddingRepository {
 
   private static final String IDENTIFIER_PATTERN = "^[A-Za-z_][A-Za-z0-9_]*$";
   private static final int MAX_HNSW_DIMENSIONS = 2000;
+  private static final String VECTOR_EXTENSION_SQL = "CREATE EXTENSION IF NOT EXISTS vector";
 
   private final JdbcTemplate jdbcTemplate;
-  private final EmbeddingModel embeddingModel;
-  private final StoreTableNamingService tableNamingService;
-  private final PgVectorStoreProperties pgVectorStoreProperties;
-  private final ConcurrentMap<StoreVectorKey, PgVectorStore> vectorStores = new ConcurrentHashMap<>();
+  private final StorageTableNamingService tableNamingService;
+  private final PgVectorStorageProperties pgVectorStorageProperties;
+  private final ConcurrentMap<StorageVectorKey, Boolean> initializedTables = new ConcurrentHashMap<>();
+  private final ConcurrentSkipListSet<String> initializedSchemas = new ConcurrentSkipListSet<>();
 
-  public void ensureStoreTableExists(long storeId, int embeddingDimensions) {
+  public void ensureStorageTableExists(UUID storageId, int embeddingDimensions) {
     if (embeddingDimensions <= 0) {
       throw new IllegalArgumentException("Embedding dimensions must be a positive number");
     }
 
-    getVectorStore(storeId, embeddingDimensions);
+    String tableName = tableNamingService.tableName(storageId);
+    StorageVectorKey key = new StorageVectorKey(tableName, embeddingDimensions);
+    initializedTables.computeIfAbsent(key, ignored -> {
+      initializeStorageTable(storageId, tableName, embeddingDimensions);
+      return Boolean.TRUE;
+    });
   }
 
-  public Map<String, float[]> findByHashes(long storeId, Integer embeddingDimensions, Collection<String> hashes) {
+  public Map<String, float[]> findByHashes(UUID storageId, Integer embeddingDimensions, Collection<String> hashes) {
     if (hashes == null || hashes.isEmpty()) {
       return Map.of();
     }
@@ -56,8 +62,8 @@ public class EmbeddingRepository {
       return Map.of();
     }
 
-    JdbcTemplate nativeClient = nativeClient(storeId, embeddingDimensions);
-    String qualifiedTableName = qualifiedTableName(storeId);
+    ensureStorageTableExists(storageId, embeddingDimensions);
+    String qualifiedTableName = qualifiedTableName(storageId);
 
     List<String> orderedHashes = new ArrayList<>(hashes);
     String placeholders = orderedHashes.stream().map(ignored -> "?").collect(Collectors.joining(", "));
@@ -66,24 +72,24 @@ public class EmbeddingRepository {
         placeholders);
 
     Map<String, float[]> results = new LinkedHashMap<>();
-    nativeClient.query(
+    jdbcTemplate.query(
         sql,
         (RowCallbackHandler) rs -> results.put(rs.getString("hash"), parseVector(rs.getString("embedding"))),
         orderedHashes.toArray());
-    log.debug("Database cache lookup storeId={} requestedHashes={} found={}", storeId, orderedHashes.size(),
+    log.debug("Database cache lookup storageId={} requestedHashes={} found={}", storageId, orderedHashes.size(),
         results.size());
     return results;
   }
 
-  public void saveEmbeddings(long storeId, int embeddingDimensions, Map<String, float[]> embeddingsByHash) {
+  public void saveEmbeddings(UUID storageId, int embeddingDimensions, Map<String, float[]> embeddingsByHash) {
     if (embeddingsByHash == null || embeddingsByHash.isEmpty()) {
       return;
     }
 
     embeddingsByHash.forEach(
         (hash, embedding) -> validateEmbedding(hash, embedding, embeddingDimensions));
-    JdbcTemplate nativeClient = nativeClient(storeId, embeddingDimensions);
-    String qualifiedTableName = qualifiedTableName(storeId);
+    ensureStorageTableExists(storageId, embeddingDimensions);
+    String qualifiedTableName = qualifiedTableName(storageId);
     List<Map.Entry<String, float[]>> entries = new ArrayList<>(embeddingsByHash.entrySet());
     String sql = """
           INSERT INTO %s (id, embedding)
@@ -91,7 +97,7 @@ public class EmbeddingRepository {
           ON CONFLICT (id) DO NOTHING
         """.formatted(qualifiedTableName);
 
-    nativeClient.batchUpdate(sql, new BatchPreparedStatementSetter() {
+    jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
       @Override
       public void setValues(PreparedStatement ps, int index) throws SQLException {
         Map.Entry<String, float[]> entry = entries.get(index);
@@ -104,64 +110,111 @@ public class EmbeddingRepository {
         return entries.size();
       }
     });
-    log.debug("Persisted embeddings into database storeId={} rows={} table={}", storeId, entries.size(),
+    log.debug("Persisted embeddings into database storageId={} rows={} table={}", storageId, entries.size(),
         qualifiedTableName);
   }
 
-  private PgVectorStore getVectorStore(long storeId, int embeddingDimensions) {
-    String tableName = tableNamingService.tableName(storeId);
-    StoreVectorKey key = new StoreVectorKey(tableName, embeddingDimensions);
-    return vectorStores.computeIfAbsent(key, ignored -> buildVectorStore(tableName, embeddingDimensions));
-  }
-
-  private PgVectorStore buildVectorStore(String tableName, int embeddingDimensions) {
-    validateIdentifier(pgVectorStoreProperties.getSchemaName(), "schema name");
+  private void initializeStorageTable(UUID storageId, String tableName, int embeddingDimensions) {
+    validateIdentifier(pgVectorStorageProperties.getSchemaName(), "schema name");
     validateIdentifier(tableName, "table name");
 
-    PgVectorStore.PgIndexType indexType = resolvedIndexType(embeddingDimensions);
+    if (pgVectorStorageProperties.isSchemaValidation()) {
+      validateSchemaExists(pgVectorStorageProperties.getSchemaName());
+    }
 
-    PgVectorStore vectorStore = PgVectorStore.builder(jdbcTemplate, embeddingModel)
-        .schemaName(pgVectorStoreProperties.getSchemaName())
-        .vectorTableName(tableName)
-        .idType(PgVectorStore.PgIdType.TEXT)
-        .vectorTableValidationsEnabled(pgVectorStoreProperties.isSchemaValidation())
-        .dimensions(embeddingDimensions)
-        .distanceType(pgVectorStoreProperties.getDistanceType())
-        .indexType(indexType)
-        .initializeSchema(pgVectorStoreProperties.isInitializeSchema())
-        .maxDocumentBatchSize(pgVectorStoreProperties.getMaxDocumentBatchSize())
-        .build();
-    vectorStore.afterPropertiesSet();
-    return vectorStore;
+    if (!pgVectorStorageProperties.isInitializeSchema()) {
+      return;
+    }
+
+    jdbcTemplate.execute(VECTOR_EXTENSION_SQL);
+
+    String qualifiedTableName = qualifiedTableName(tableName);
+    String createTableSql = """
+        CREATE TABLE IF NOT EXISTS %s (
+          id CHAR(16) PRIMARY KEY,
+          embedding vector(%d) NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """.formatted(qualifiedTableName, embeddingDimensions);
+    jdbcTemplate.execute(createTableSql);
+
+    String createdAtIndexName = tableNamingService.createdAtIndexName(storageId);
+    validateIdentifier(createdAtIndexName, "index name");
+    jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS %s ON %s (created_at)"
+        .formatted(createdAtIndexName, qualifiedTableName));
+
+    PgVectorStorageProperties.IndexType indexType = resolvedIndexType(embeddingDimensions);
+    if (indexType != PgVectorStorageProperties.IndexType.NONE) {
+      String vectorIndexName = vectorIndexName(tableName);
+      validateIdentifier(vectorIndexName, "index name");
+      String vectorIndexSql = "CREATE INDEX IF NOT EXISTS %s ON %s USING %s (embedding %s)"
+          .formatted(
+              vectorIndexName,
+              qualifiedTableName,
+              indexMethod(indexType),
+              vectorOperatorClass(pgVectorStorageProperties.getDistanceType()));
+      jdbcTemplate.execute(vectorIndexSql);
+    }
   }
 
-  private JdbcTemplate nativeClient(long storeId, int embeddingDimensions) {
-    return getVectorStore(storeId, embeddingDimensions)
-        .<JdbcTemplate>getNativeClient()
-        .orElseThrow(() -> new IllegalStateException("PgVectorStore native JdbcTemplate is not available"));
-  }
-
-  private String qualifiedTableName(long storeId) {
-    String tableName = tableNamingService.tableName(storeId);
+  private String qualifiedTableName(UUID storageId) {
+    String tableName = tableNamingService.tableName(storageId);
     return qualifiedTableName(tableName);
   }
 
   private String qualifiedTableName(String tableName) {
-    validateIdentifier(pgVectorStoreProperties.getSchemaName(), "schema name");
+    validateIdentifier(pgVectorStorageProperties.getSchemaName(), "schema name");
     validateIdentifier(tableName, "table name");
-    return pgVectorStoreProperties.getSchemaName() + "." + tableName;
+    return pgVectorStorageProperties.getSchemaName() + "." + tableName;
   }
 
-  private PgVectorStore.PgIndexType resolvedIndexType(int embeddingDimensions) {
-    PgVectorStore.PgIndexType configuredIndexType = pgVectorStoreProperties.getIndexType();
-    if (configuredIndexType == PgVectorStore.PgIndexType.HNSW && embeddingDimensions > MAX_HNSW_DIMENSIONS) {
+  private PgVectorStorageProperties.IndexType resolvedIndexType(int embeddingDimensions) {
+    PgVectorStorageProperties.IndexType configuredIndexType = pgVectorStorageProperties.getIndexType();
+    if (configuredIndexType == PgVectorStorageProperties.IndexType.HNSW
+        && embeddingDimensions > MAX_HNSW_DIMENSIONS) {
       log.warn(
           "Disabling HNSW index for embedding dimensions={} because pgvector supports at most {} dimensions for HNSW",
           embeddingDimensions,
           MAX_HNSW_DIMENSIONS);
-      return PgVectorStore.PgIndexType.NONE;
+      return PgVectorStorageProperties.IndexType.NONE;
     }
     return configuredIndexType;
+  }
+
+  private String indexMethod(PgVectorStorageProperties.IndexType indexType) {
+    return switch (indexType) {
+      case HNSW -> "HNSW";
+      case IVFFLAT -> "IVFFLAT";
+      case NONE -> throw new IllegalArgumentException("NONE index type does not have a SQL index method");
+    };
+  }
+
+  private String vectorOperatorClass(PgVectorStorageProperties.DistanceType distanceType) {
+    return switch (distanceType) {
+      case COSINE_DISTANCE -> "vector_cosine_ops";
+      case EUCLIDEAN_DISTANCE -> "vector_l2_ops";
+      case NEGATIVE_INNER_PRODUCT -> "vector_ip_ops";
+    };
+  }
+
+  private String vectorIndexName(String tableName) {
+    return "idx_" + tableName + "_embedding";
+  }
+
+  private void validateSchemaExists(String schemaName) {
+    if (initializedSchemas.contains(schemaName)) {
+      return;
+    }
+
+    Integer count = jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?",
+        Integer.class,
+        schemaName);
+
+    if (count == null || count == 0) {
+      throw new IllegalArgumentException("Configured schema does not exist: " + schemaName);
+    }
+    initializedSchemas.add(schemaName);
   }
 
   private void validateEmbedding(String hash, float[] embedding, int expectedDimensions) {
@@ -188,6 +241,6 @@ public class EmbeddingRepository {
     }
   }
 
-  private record StoreVectorKey(String tableName, int embeddingDimensions) {
+  private record StorageVectorKey(String tableName, int embeddingDimensions) {
   }
 }
