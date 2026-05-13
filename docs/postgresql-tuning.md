@@ -1,4 +1,4 @@
-# PostgreSQL Tuning for Embedding Cache
+# PostgreSQL Tuning for Embedding
 
 This document provides tuning recommendations for the PostgreSQL database used by the **lareferencia-embedding-service**, specifically optimized for large datasets (50 GB+).
 
@@ -211,3 +211,7 @@ ORDER BY duration DESC;
 | **Large table**      | `fillfactor = 90`, tune autovacuum, monitor dead tuples  |
 | **Connection pool**  | HikariCP `maximum-pool-size = 20`                        |
 | **Maintenance**      | Regular `VACUUM`, `ANALYZE` after bulk loads             |
+
+
+## Speed up PostgreSQL/pgvector for search
+- [https://aiven.io/developer/postgresql-pgvector-indexes](https://aiven.io/developer/postgresql-pgvector-indexes)

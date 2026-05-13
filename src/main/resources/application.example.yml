@@ -32,5 +32,4 @@ app.pgvector.max-document-batch-size: 10000
 management.endpoints.web.exposure.include: health,metrics,prometheus
 management.metrics.tags.application: ${spring.application.name}
 
-logging.pattern.level: "%5p [requestId:%X{requestId}]"
 logging.level.org.lareferencia.embedding: INFO

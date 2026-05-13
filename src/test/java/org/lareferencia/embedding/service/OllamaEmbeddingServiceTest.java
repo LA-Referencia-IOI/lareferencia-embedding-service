@@ -12,7 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.lareferencia.embedding.config.OllamaClientProperties;
+import org.lareferencia.embedding.config.EmbeddingProviderProperties;
 import org.lareferencia.embedding.exception.EmbeddingProviderException;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -25,7 +25,7 @@ class EmbeddingProviderServiceTest {
 
   @BeforeEach
   void setUp() {
-    OllamaClientProperties properties = new OllamaClientProperties();
+    EmbeddingProviderProperties properties = new EmbeddingProviderProperties();
     properties.setOllamaUrl("http://localhost:11434/v1/embeddings");
 
     RestClient.Builder builder = RestClient.builder();
@@ -49,10 +49,10 @@ class EmbeddingProviderServiceTest {
 
   @Test
   void sendsBearerTokenAndParsesOpenAiStyleEmbeddings() {
-    OllamaClientProperties properties = new OllamaClientProperties();
+    EmbeddingProviderProperties properties = new EmbeddingProviderProperties();
     properties.setOpenaiUrl("https://api.openai.com/v1/embeddings");
     properties.setApiKey("test-key");
-    properties.setType(OllamaClientProperties.ProviderType.OPENAI);
+    properties.setType(EmbeddingProviderProperties.ProviderType.OPENAI);
 
     RestClient.Builder builder = RestClient.builder();
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
@@ -90,10 +90,10 @@ class EmbeddingProviderServiceTest {
 
   @Test
   void extractsUsageForOpenRouter() {
-    OllamaClientProperties properties = new OllamaClientProperties();
+    EmbeddingProviderProperties properties = new EmbeddingProviderProperties();
     properties.setOpenrouterUrl("https://openrouter.ai/api/v1/embeddings");
     properties.setApiKey("test-key");
-    properties.setType(OllamaClientProperties.ProviderType.OPENROUTER);
+    properties.setType(EmbeddingProviderProperties.ProviderType.OPENROUTER);
 
     RestClient.Builder builder = RestClient.builder();
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();

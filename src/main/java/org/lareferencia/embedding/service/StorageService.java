@@ -1,7 +1,12 @@
 package org.lareferencia.embedding.service;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
+import jakarta.annotation.PostConstruct;
 
 import org.lareferencia.embedding.dto.CreateStorageRequest;
 import org.lareferencia.embedding.dto.StorageResponse;
@@ -11,7 +16,6 @@ import org.lareferencia.embedding.exception.StorageAlreadyExistsException;
 import org.lareferencia.embedding.exception.StorageNotFoundException;
 import org.lareferencia.embedding.repository.EmbeddingRepository;
 import org.lareferencia.embedding.repository.StorageRepository;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,20 +28,30 @@ import lombok.extern.slf4j.Slf4j;
 public class StorageService {
 
   private final StorageRepository storageRepository;
-  private final EmbeddingProviderService ollamaEmbeddingService;
+  private final EmbeddingProviderService embeddingProviderService;
   private final EmbeddingRepository embeddingRepository;
+
+  private final ConcurrentMap<UUID, StorageEntity> storageCache = new ConcurrentHashMap<>();
+
+  @PostConstruct
+  void loadStoragesIntoCache() {
+    storageRepository.findAll().forEach(s -> storageCache.put(s.getId(), s));
+    log.info("Loaded {} storage(s) into memory cache", storageCache.size());
+  }
 
   @Transactional
   public StorageResponse createStorage(CreateStorageRequest request) {
     String normalizedName = request.name().trim();
     String normalizedModel = request.model().trim();
-    String provider = ollamaEmbeddingService.provider();
+    String provider = embeddingProviderService.provider();
 
-    if (storageRepository.existsByNameIgnoreCase(normalizedName)) {
+    boolean nameAlreadyExists = storageCache.values().stream()
+        .anyMatch(s -> s.getName().equalsIgnoreCase(normalizedName));
+    if (nameAlreadyExists) {
       throw new StorageAlreadyExistsException(normalizedName);
     }
 
-    int embeddingDimensions = ollamaEmbeddingService.resolveDimensions(normalizedModel);
+    int embeddingDimensions = embeddingProviderService.resolveDimensions(normalizedModel);
 
     StorageEntity savedStorage = storageRepository.save(StorageEntity.builder()
         .name(normalizedName)
@@ -46,6 +60,7 @@ public class StorageService {
         .embeddingDimensions(embeddingDimensions)
         .build());
     embeddingRepository.ensureStorageTableExists(savedStorage.getId(), embeddingDimensions);
+    storageCache.put(savedStorage.getId(), savedStorage);
     log.info("Created embedding storage id={} name={} model={}", savedStorage.getId(), savedStorage.getName(),
         savedStorage.getModel());
     return toResponse(savedStorage);
@@ -68,22 +83,26 @@ public class StorageService {
 
     storage.setEmbeddingDimensions(embeddingDimensions);
     storageRepository.save(storage);
+    // storage is the same reference stored in the cache, so the cache is already
+    // updated
     log.info("Registered embedding dimensions={} for storage id={} name={}", embeddingDimensions, storage.getId(),
         storage.getName());
     return embeddingDimensions;
   }
 
-  @Transactional(readOnly = true)
   public List<StorageResponse> listStorages() {
-    return storageRepository.findAll(Sort.by(Sort.Direction.ASC, "id")).stream()
+    return storageCache.values().stream()
+        .sorted(Comparator.comparing(StorageEntity::getId))
         .map(this::toResponse)
         .toList();
   }
 
-  @Transactional(readOnly = true)
   public StorageEntity getRequiredStorage(UUID storageId) {
-    return storageRepository.findById(storageId)
-        .orElseThrow(() -> new StorageNotFoundException(storageId));
+    StorageEntity storage = storageCache.get(storageId);
+    if (storage == null) {
+      throw new StorageNotFoundException(storageId);
+    }
+    return storage;
   }
 
   private StorageResponse toResponse(StorageEntity storage) {

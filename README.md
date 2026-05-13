@@ -11,7 +11,7 @@ A high-performance, deterministic embedding cache microservice designed to elimi
 - **Storage-Based Architecture:** Named storages bind a model and provider to a dedicated pgvector table. Create a storage first, then reference its UUID in embedding requests.
 - **Dimension-Aware PGvector Tables:** Embedding dimensions are resolved from the provider at storage creation time; the dedicated pgvector table is created immediately with the correct vector size.
 - **PostgreSQL + pgvector:** Persistent, scalable vector storage with built-in SQL queryability and auditability.
-- **Request Correlation IDs:** Automatic request tracing via MDC for end-to-end observability across logs.
+- **In-Memory Storage Cache:** Registered storages are loaded into memory at startup and kept in sync on writes, eliminating database round-trips on the hot embedding path.
 - **HTTP Timeouts:** Configurable connection and request timeouts for external embedding providers.
 - **Provider Abstraction:** Extensible interface for multiple embedding provider implementations.
 
@@ -58,7 +58,7 @@ flowchart TD
     C --> D{"Cache Lookup (PostgreSQL + pgvector)"}
 
     D -->|HIT| E[Assemble Response]
-    D -->|MISS| F["Batch Fetch from Provider (Ollama/OpenAI)"]
+    D -->|MISS| F["Batch Fetch from Provider (Ollama / OpenAI / OpenRouter)"]
 
     F --> G[Persist in PostgreSQL with pgvector]
     G --> E

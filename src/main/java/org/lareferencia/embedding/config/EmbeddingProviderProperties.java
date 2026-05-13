@@ -5,7 +5,7 @@ import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "app.embedding.provider")
-public class OllamaClientProperties {
+public class EmbeddingProviderProperties {
 
   public enum ProviderType {
     OLLAMA,

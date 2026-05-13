@@ -5,7 +5,7 @@ import java.util.List;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import org.lareferencia.embedding.config.OllamaClientProperties;
+import org.lareferencia.embedding.config.EmbeddingProviderProperties;
 import org.lareferencia.embedding.exception.EmbeddingProviderException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -22,9 +22,9 @@ import lombok.extern.slf4j.Slf4j;
 public class EmbeddingProviderService {
 
   private static final List<String> DIMENSION_PROBE_CANDIDATES = List.of("dimension probe");
-  private final RestClient ollamaRestClient;
+  private final RestClient embeddingRestClient;
   private final ObjectMapper objectMapper;
-  private final OllamaClientProperties ollamaClientProperties;
+  private final EmbeddingProviderProperties ollamaClientProperties;
 
   public EmbeddingBatchResult embed(List<String> inputs, String model) {
     if (inputs == null || inputs.isEmpty()) {
@@ -38,7 +38,7 @@ public class EmbeddingProviderService {
       String provider = providerName();
       log.info("Calling external embedding provider provider={} model={} inputs={}", provider, model,
           inputs.size());
-      JsonNode response = ollamaRestClient.post()
+      JsonNode response = embeddingRestClient.post()
           .uri(providerEndpoint())
           .headers(this::applyAuthentication)
           .contentType(MediaType.APPLICATION_JSON)
@@ -161,7 +161,7 @@ public class EmbeddingProviderService {
     List<float[]> embeddings = new java.util.ArrayList<>(dataNode.size());
     for (JsonNode itemNode : dataNode) {
       JsonNode embeddingNode = itemNode.get("embedding");
-      if (!embeddingNode.isArray()) {
+      if (embeddingNode == null || !embeddingNode.isArray()) {
         throw new EmbeddingProviderException("Embedding response contains malformed embedding payload");
       }
       embeddings.add(toFloatArray(embeddingNode));

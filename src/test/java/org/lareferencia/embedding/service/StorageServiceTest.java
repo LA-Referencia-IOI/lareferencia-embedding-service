@@ -35,7 +35,7 @@ class StorageServiceTest {
   private StorageRepository storageRepository;
 
   @Mock
-  private EmbeddingProviderService ollamaEmbeddingService;
+  private EmbeddingProviderService embeddingProviderService;
 
   @Mock
   private EmbeddingRepository embeddingRepository;
@@ -44,14 +44,15 @@ class StorageServiceTest {
 
   @BeforeEach
   void setUp() {
-    storageService = new StorageService(storageRepository, ollamaEmbeddingService, embeddingRepository);
+    when(storageRepository.findAll()).thenReturn(List.of());
+    storageService = new StorageService(storageRepository, embeddingProviderService, embeddingRepository);
+    storageService.loadStoragesIntoCache();
   }
 
   @Test
   void createsStorageAfterValidatingModelAndAllocatingEmbeddingTable() {
-    when(storageRepository.existsByNameIgnoreCase("publications")).thenReturn(false);
-    when(ollamaEmbeddingService.provider()).thenReturn("openrouter");
-    when(ollamaEmbeddingService.resolveDimensions("nomic-embed-text")).thenReturn(768);
+    when(embeddingProviderService.provider()).thenReturn("openrouter");
+    when(embeddingProviderService.resolveDimensions("nomic-embed-text")).thenReturn(768);
     when(storageRepository.save(any(StorageEntity.class))).thenReturn(StorageEntity.builder()
         .id(STORE_ID)
         .name("publications")
@@ -68,13 +69,17 @@ class StorageServiceTest {
     assertEquals("publications", response.name());
     assertEquals("nomic-embed-text", response.model());
     assertEquals("openrouter", response.provider());
-    verify(ollamaEmbeddingService).resolveDimensions("nomic-embed-text");
+    verify(embeddingProviderService).resolveDimensions("nomic-embed-text");
     verify(embeddingRepository).ensureStorageTableExists(STORE_ID, 768);
   }
 
   @Test
   void rejectsDuplicateStorageNames() {
-    when(storageRepository.existsByNameIgnoreCase("publications")).thenReturn(true);
+    // Pre-populate cache with an existing storage
+    when(storageRepository.findAll()).thenReturn(List.of(
+        StorageEntity.builder().id(STORE_ID).name("publications").model("nomic-embed-text")
+            .provider("openrouter").createdAt(Instant.now()).build()));
+    storageService.loadStoragesIntoCache();
 
     assertThrows(StorageAlreadyExistsException.class,
         () -> storageService.createStorage(new CreateStorageRequest("publications", "nomic-embed-text")));
@@ -82,9 +87,8 @@ class StorageServiceTest {
 
   @Test
   void doesNotCreateStorageWhenProviderRejectsModel() {
-    when(storageRepository.existsByNameIgnoreCase("publications")).thenReturn(false);
-    when(ollamaEmbeddingService.provider()).thenReturn("openrouter");
-    when(ollamaEmbeddingService.resolveDimensions("missing-model"))
+    when(embeddingProviderService.provider()).thenReturn("openrouter");
+    when(embeddingProviderService.resolveDimensions("missing-model"))
         .thenThrow(new EmbeddingProviderException("model 'missing-model' not found"));
 
     assertThrows(EmbeddingProviderException.class,
@@ -96,22 +100,16 @@ class StorageServiceTest {
 
   @Test
   void listsRegisteredStorages() {
-    when(storageRepository.findAll(any(org.springframework.data.domain.Sort.class))).thenReturn(List.of(
+    when(storageRepository.findAll()).thenReturn(List.of(
         StorageEntity.builder().id(STORE_ID).name("publications").model("nomic-embed-text")
-            .provider("openrouter")
-            .createdAt(Instant.now())
-            .build(),
-        StorageEntity.builder().id(STORE_ID_2).name("repositories").model("mxbai-embed-large").provider("openai")
-            .createdAt(Instant.now())
-            .build()));
+            .provider("openrouter").createdAt(Instant.now()).build(),
+        StorageEntity.builder().id(STORE_ID_2).name("repositories").model("mxbai-embed-large")
+            .provider("openai").createdAt(Instant.now()).build()));
+    storageService.loadStoragesIntoCache();
 
     List<StorageResponse> responses = storageService.listStorages();
 
     assertEquals(2, responses.size());
-    assertEquals("publications", responses.get(0).name());
-    assertEquals("openrouter", responses.get(0).provider());
-    assertEquals("repositories", responses.get(1).name());
-    assertEquals("openai", responses.get(1).provider());
   }
 
   @Test

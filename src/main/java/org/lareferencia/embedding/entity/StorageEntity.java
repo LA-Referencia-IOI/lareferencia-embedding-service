@@ -8,7 +8,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.Index;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
@@ -20,7 +19,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "storages", uniqueConstraints = @UniqueConstraint(name = "uk_storage_name", columnNames = "name"), indexes = @Index(name = "idx_storage_name", columnList = "name"))
+@Table(name = "storages", uniqueConstraints = @UniqueConstraint(name = "uk_storage_name", columnNames = "name"))
 @Getter
 @Setter
 @Builder

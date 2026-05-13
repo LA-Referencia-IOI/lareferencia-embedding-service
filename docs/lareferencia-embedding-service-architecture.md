@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-The **LA Referencia Embedding Service** is a high-performance microservice designed to optimize the semantic indexing pipeline. It acts as a deterministic proxy between the indexing system and the embedding model provider (e.g., Ollama/Qwen). By caching embeddings in a persistent backend, the system eliminates redundant computations for identical strings, significantly reducing infrastructure costs and increasing overall throughput.
+The **LA Referencia Embedding Service** is a high-performance microservice designed to optimize the semantic indexing pipeline. It acts as a deterministic proxy between the indexing system and an embedding model provider — **Ollama**, **OpenAI**, or **OpenRouter** — selected at configuration time. By caching embeddings in a persistent backend, the system eliminates redundant computations for identical strings, significantly reducing infrastructure costs and increasing overall throughput.
 
 ---
 
@@ -12,6 +12,7 @@ The **LA Referencia Embedding Service** is a high-performance microservice desig
 
 - **Deterministic Caching:** Guarantees that identical input strings always yield the same cached vector.
 - **Batch Processing:** Supports array-based inputs in a single request while maintaining strict order preservation.
+- **In-Memory Storage Cache:** Registered storages are loaded into a `ConcurrentHashMap` at startup and kept in sync on writes, eliminating database round-trips on the hot embedding path.
 - **PostgreSQL + pgvector:** Uses PostgreSQL with the pgvector extension for persistent, scalable vector storage with native SQL queryability.
 
 ### 🛠️ Data Integrity
@@ -22,7 +23,6 @@ The **LA Referencia Embedding Service** is a high-performance microservice desig
 
 ### 🔍 Observability
 
-- **Request Correlation IDs:** Every request is assigned a unique correlation ID (from `X-Request-Id` header or auto-generated UUID) and included in all logs via MDC for end-to-end tracing.
 - **Provider URL in Errors:** Error messages include the embedding provider endpoint URL for debugging connection issues.
 - **Configurable Timeouts:** HTTP connection and request timeouts are independently configurable for the external embedding provider.
 
@@ -34,17 +34,16 @@ The following diagram illustrates the lifecycle of an embedding request:
 
 ```mermaid
 flowchart TD
-    A["String or List, Model (OpenRouter Format)"] --> B[Text Normalization v1]
+    A["String or List + Storage UUID"] --> B[Text Normalization v1]
     B --> C["Hash Generation (xxHash64)"]
     C --> D{"Cache Lookup (PostgreSQL + pgvector)"}
 
     D -->|HIT| E[Assemble Response]
-    D -->|MISS| F["Batch Fetch from Provider (Ollama/OpenAI)"]
-    F --> F1["Configure with timeout settings"]
+    D -->|MISS| F["Batch Fetch from Provider (Ollama / OpenAI / OpenRouter)"]
 
-    F1 --> G["Persist in PostgreSQL"]
+    F --> G["Persist in PostgreSQL"]
     G --> E
-    E --> H["JSON Response (OpenRouter Format)"]
+    E --> H["JSON Response (OpenAI-compatible format)"]
 ```
 
 ---
@@ -54,20 +53,20 @@ flowchart TD
 To ensure deterministic hashing, the following rules are applied in order:
 
 1.  **Trim:** Remove leading and trailing whitespace.
-2.  **Unicode Normalization (NFC):** Standardize characters.
+2.  **Replace Line Breaks:** Replace `\n`/`\r` sequences with a single space.
 3.  **Collapse Spaces:** Replace multiple consecutive spaces with a single one.
-4.  **Replace Line Breaks:** Replace repeated line breaks with a single space.
+4.  **Unicode Normalization (NFC):** Standardize character composition (e.g. ensures `ç` is stored as one code point, not `c` + combining cedilla).
     _Note: Case and accents are preserved in version 1._
 
 ---
 
 ## 5. API Strategy
 
-The application follows a versioned API approach (`/api/v1`) to ensure long-term stability. Embedding generation is storage-scoped: callers first create a named storage (which resolves dimensions and creates the pgvector table), then submit embedding requests referencing the storage's UUID as the `model` field.
+The application follows a versioned API approach (`/api/v1`) to ensure long-term stability. Embedding generation is storage-scoped: callers first create a named storage (which resolves dimensions from the provider and creates the pgvector table), then submit embedding requests referencing the storage's UUID as the `model` field.
 
-- **`POST /api/v1/storages`**: Create a named storage binding a model string to a dedicated pgvector table.
+- **`POST /api/v1/storages`**: Create a named storage binding a model string to a dedicated pgvector table. The embedding provider is contacted at creation time to resolve model dimensions.
 - **`GET /api/v1/storages`**: List all registered storages.
-- **`POST /api/v1/embeddings`**: Main entry point for embedding generation/caching. The `model` field must be the UUID of an existing storage.
+- **`POST /api/v1/embeddings`**: Main entry point for embedding generation/caching. The `model` field must be the UUID of an existing storage. The request body follows the OpenAI embeddings API format — a single string or an array of strings.
 
 ---
 
@@ -93,31 +92,17 @@ PostgreSQL with `pgvector` provides:
 
 ### HTTP Timeouts
 
-External provider calls (Ollama/OpenAI) are protected by configurable timeouts:
+External provider calls (Ollama, OpenAI, OpenRouter) are protected by configurable timeouts:
 
 - `app.embedding.provider.connect-timeout` (default: 5 seconds) – Maximum time to establish a connection
 - `app.embedding.provider.request-timeout` (default: 30 seconds) – Maximum time to receive a response
 
 These can be overridden via environment variables or `application.yml`.
 
-### Request Correlation IDs
-
-Every incoming request receives a unique correlation ID (from the `X-Request-Id` header or auto-generated UUID). This ID is:
-
-- Storaged in the Mapped Diagnostic Context (MDC) for logging
-- Returned in the response `X-Request-Id` header
-- Available in all logs for end-to-end tracing across the application
-
-Example log entry:
-
-```
-2026-05-11T10:15:23.456Z INFO  [requestId=550e8400-e29b-41d4-a716-446655440000] StorageService: Creating storage 'my-storage'
-```
-
 ### Operational Benefits
 
 - **Auditability:** PostgreSQL provides SQL-based audit trails for all embeddings and lookups.
-- **Observability:** Request correlation IDs enable end-to-end tracing; error messages include provider URLs for debugging.
+- **Observability:** Error messages include provider URLs for debugging.
 - **Reliability:** Configurable HTTP timeouts prevent hanging requests to external providers.
 - **Consistency:** PostgreSQL ensures data consistency and recovery across restarts.
 

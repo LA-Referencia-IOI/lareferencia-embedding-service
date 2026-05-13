@@ -19,7 +19,6 @@ import org.lareferencia.embedding.repository.EmbeddingRepository;
 import org.lareferencia.embedding.util.PerKeyLockManager;
 import org.lareferencia.embedding.util.TextNormalizer;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -35,13 +34,12 @@ public class EmbeddingService {
     private final StorageService storageService;
     private final EmbeddingRepository embeddingRepository;
     private final HashService hashService;
-    private final EmbeddingProviderService ollamaEmbeddingService;
+    private final EmbeddingProviderService embeddingProviderService;
     private final MeterRegistry meterRegistry;
     private final TextNormalizer textNormalizer;
     private final ApplicationProperties applicationProperties;
     private final PerKeyLockManager perKeyLockManager;
 
-    @Transactional
     public GenerateEmbeddingsResponse generateEmbeddings(GenerateEmbeddingsRequest request) {
         List<String> inputs = validateAndExtractInputs(request);
         StorageEntity storage = storageService.getRequiredStorage(request.model());
@@ -70,7 +68,7 @@ public class EmbeddingService {
         Map<String, float[]> cachedEmbeddings = embeddingRepository.findByHashes(storage.getId(),
                 storage.getEmbeddingDimensions(),
                 new LinkedHashSet<>(hashes));
-        String provider = ollamaEmbeddingService.provider();
+        String provider = embeddingProviderService.provider();
         GenerateEmbeddingsResponse.Usage usage = new GenerateEmbeddingsResponse.Usage(0, 0);
         List<float[]> results = new ArrayList<>(Collections.nCopies(inputs.size(), null));
         LinkedHashMap<String, String> missingByHash = new LinkedHashMap<>();
@@ -129,7 +127,7 @@ public class EmbeddingService {
                             storage.getModel(),
                             unresolvedByHash.size());
                     Timer.Sample sample = Timer.start(meterRegistry);
-                    EmbeddingProviderService.EmbeddingBatchResult generatedBatch = ollamaEmbeddingService
+                    EmbeddingProviderService.EmbeddingBatchResult generatedBatch = embeddingProviderService
                             .embed(List.copyOf(unresolvedByHash.values()), storage.getModel());
                     sample.stop(generationLatencyTimer);
 
@@ -207,7 +205,7 @@ public class EmbeddingService {
             StorageEntity storage) {
         if (generatedEmbeddings.size() != expectedSize) {
             throw new EmbeddingProviderException(
-                    "Ollama returned " + generatedEmbeddings.size() + " embeddings for " + expectedSize + " inputs");
+                    "Provider returned " + generatedEmbeddings.size() + " embeddings for " + expectedSize + " inputs");
         }
 
         int expectedDimensions = -1;
@@ -215,7 +213,7 @@ public class EmbeddingService {
             float[] embedding = generatedEmbeddings.get(index);
             if (embedding == null || embedding.length == 0) {
                 throw new EmbeddingProviderException(
-                        "Ollama returned an empty embedding at index " + index + " for storage " + storage.getName());
+                        "Provider returned an empty embedding at index " + index + " for storage " + storage.getName());
             }
             if (expectedDimensions < 0) {
                 expectedDimensions = embedding.length;
@@ -223,7 +221,7 @@ public class EmbeddingService {
             }
             if (embedding.length != expectedDimensions) {
                 throw new EmbeddingProviderException(
-                        "Ollama returned inconsistent embedding dimensions: " + embedding.length
+                        "Provider returned inconsistent embedding dimensions: " + embedding.length
                                 + " at index " + index + " (expected " + expectedDimensions + ")");
             }
         }

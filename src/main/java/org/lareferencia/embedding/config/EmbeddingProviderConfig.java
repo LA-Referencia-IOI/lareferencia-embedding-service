@@ -8,16 +8,16 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 @Configuration
-public class OllamaConfig {
+public class EmbeddingProviderConfig {
 
     @Bean
-    RestClient ollamaRestClient(OllamaClientProperties ollamaClientProperties) {
+    RestClient embeddingRestClient(EmbeddingProviderProperties providerProperties) {
         HttpClient httpClient = HttpClient.newBuilder()
-                .connectTimeout(ollamaClientProperties.getConnectTimeout())
+                .connectTimeout(providerProperties.getConnectTimeout())
                 .build();
 
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
-        requestFactory.setReadTimeout(ollamaClientProperties.getRequestTimeout());
+        requestFactory.setReadTimeout(providerProperties.getRequestTimeout());
 
         return RestClient.builder()
                 .requestFactory(requestFactory)

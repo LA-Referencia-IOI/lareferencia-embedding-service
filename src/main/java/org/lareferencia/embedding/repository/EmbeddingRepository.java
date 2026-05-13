@@ -128,17 +128,12 @@ public class EmbeddingRepository {
     String qualifiedTableName = qualifiedTableName(tableName);
     String createTableSql = """
         CREATE TABLE IF NOT EXISTS %s (
-          id CHAR(16) PRIMARY KEY,
+          id TEXT PRIMARY KEY,
           embedding vector(%d) NOT NULL,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         """.formatted(qualifiedTableName, embeddingDimensions);
     jdbcTemplate.execute(createTableSql);
-
-    String createdAtIndexName = tableNamingService.createdAtIndexName(storageId);
-    validateIdentifier(createdAtIndexName, "index name");
-    jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS %s ON %s (created_at)"
-        .formatted(createdAtIndexName, qualifiedTableName));
 
     PgVectorStorageProperties.IndexType indexType = resolvedIndexType(embeddingDimensions);
     if (indexType != PgVectorStorageProperties.IndexType.NONE) {
