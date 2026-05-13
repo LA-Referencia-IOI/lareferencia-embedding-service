@@ -1,9 +1,11 @@
 package org.lareferencia.embedding.repository;
 
-import org.lareferencia.embedding.entity.EmbeddingStoreEntity;
+import java.util.UUID;
+
+import org.lareferencia.embedding.entity.StorageEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 
-public interface StoreRepository extends JpaRepository<EmbeddingStoreEntity, Long> {
+public interface StorageRepository extends JpaRepository<StorageEntity, UUID> {
 
   boolean existsByNameIgnoreCase(String name);
 }

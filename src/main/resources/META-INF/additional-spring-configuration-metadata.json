@@ -11,6 +11,11 @@
       "description": "Maximum number of characters allowed per input text."
     },
     {
+      "name": "app.embedding.provider.type",
+      "type": "java.lang.String",
+      "description": "Embedding provider type. Supported values: OLLAMA, OPENAI, OPENROUTER."
+    },
+    {
       "name": "app.embedding.provider.connect-timeout",
       "type": "java.time.Duration",
       "description": "Timeout used to establish the HTTP connection to the embedding provider."
@@ -21,19 +26,54 @@
       "description": "Maximum time allowed for a synchronous embedding request to complete."
     },
     {
-      "name": "spring.ai.ollama.base-url",
+      "name": "app.embedding.provider.ollama-url",
       "type": "java.lang.String",
-      "description": "Base URL for the Ollama server used by Spring AI."
+      "description": "Full URL for the Ollama embeddings endpoint."
     },
     {
-      "name": "spring.ai.ollama.embedding.options.model",
+      "name": "app.embedding.provider.openai-url",
       "type": "java.lang.String",
-      "description": "Default Ollama embedding model used by Spring AI."
+      "description": "Full URL for the OpenAI embeddings endpoint."
     },
     {
-      "name": "spring.ai.ollama.init.timeout",
-      "type": "java.time.Duration",
-      "description": "How long Spring AI waits for Ollama model initialization or auto-pull to complete."
+      "name": "app.embedding.provider.openrouter-url",
+      "type": "java.lang.String",
+      "description": "Full URL for the OpenRouter embeddings endpoint."
+    },
+    {
+      "name": "app.embedding.provider.api-key",
+      "type": "java.lang.String",
+      "description": "API key used as Bearer token when calling the selected embedding provider."
+    },
+    {
+      "name": "app.pgvector.initialize-schema",
+      "type": "java.lang.Boolean",
+      "description": "Whether to initialize pgvector schema objects automatically."
+    },
+    {
+      "name": "app.pgvector.schema-name",
+      "type": "java.lang.String",
+      "description": "Database schema name used to create and query vector tables."
+    },
+    {
+      "name": "app.pgvector.schema-validation",
+      "type": "java.lang.Boolean",
+      "description": "Whether to validate that the configured schema exists."
+    },
+    {
+      "name": "app.pgvector.index-type",
+      "type": "java.lang.String",
+      "description": "Vector ANN index type. Supported values: NONE, HNSW, IVFFLAT."
+    },
+    {
+      "name": "app.pgvector.distance-type",
+      "type": "java.lang.String",
+      "description": "Vector distance type. Supported values: COSINE_DISTANCE, EUCLIDEAN_DISTANCE, NEGATIVE_INNER_PRODUCT."
+    },
+    {
+      "name": "app.pgvector.max-document-batch-size",
+      "type": "java.lang.Integer",
+      "description": "Maximum number of documents to process in a single batch operation."
     }
   ]
 }

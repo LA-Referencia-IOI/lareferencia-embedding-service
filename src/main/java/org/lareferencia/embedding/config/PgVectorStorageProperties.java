@@ -1,22 +1,33 @@
 package org.lareferencia.embedding.config;
 
-import org.springframework.ai.vectorstore.pgvector.PgVectorStore;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-@ConfigurationProperties(prefix = "spring.ai.vectorstore.pgvector")
-public class PgVectorStoreProperties {
+@ConfigurationProperties(prefix = "app.pgvector")
+public class PgVectorStorageProperties {
 
   private boolean initializeSchema = true;
 
-  private String schemaName = PgVectorStore.DEFAULT_SCHEMA_NAME;
+  private String schemaName = "public";
 
   private boolean schemaValidation = false;
 
-  private PgVectorStore.PgIndexType indexType = PgVectorStore.PgIndexType.HNSW;
+  private IndexType indexType = IndexType.HNSW;
 
-  private PgVectorStore.PgDistanceType distanceType = PgVectorStore.PgDistanceType.COSINE_DISTANCE;
+  private DistanceType distanceType = DistanceType.COSINE_DISTANCE;
 
-  private int maxDocumentBatchSize = PgVectorStore.MAX_DOCUMENT_BATCH_SIZE;
+  private int maxDocumentBatchSize = 10000;
+
+  public enum IndexType {
+    NONE,
+    HNSW,
+    IVFFLAT
+  }
+
+  public enum DistanceType {
+    COSINE_DISTANCE,
+    EUCLIDEAN_DISTANCE,
+    NEGATIVE_INNER_PRODUCT
+  }
 
   public boolean isInitializeSchema() {
     return initializeSchema;
@@ -42,19 +53,19 @@ public class PgVectorStoreProperties {
     this.schemaValidation = schemaValidation;
   }
 
-  public PgVectorStore.PgIndexType getIndexType() {
+  public IndexType getIndexType() {
     return indexType;
   }
 
-  public void setIndexType(PgVectorStore.PgIndexType indexType) {
+  public void setIndexType(IndexType indexType) {
     this.indexType = indexType;
   }
 
-  public PgVectorStore.PgDistanceType getDistanceType() {
+  public DistanceType getDistanceType() {
     return distanceType;
   }
 
-  public void setDistanceType(PgVectorStore.PgDistanceType distanceType) {
+  public void setDistanceType(DistanceType distanceType) {
     this.distanceType = distanceType;
   }
 

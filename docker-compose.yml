@@ -1,24 +1,27 @@
 services:
   # Default local development service.
-  # CACHE_TYPE can be sqlite, rocksdb, or postgres.
   # For postgres, start Compose with: docker compose --profile postgres up
   app:
-    image: maven:3.9.9-eclipse-temurin-17
-    container_name: embedding-cache-app
+    image: maven:3.9.9-eclipse-temurin-21
+    container_name: lareferencia-embedding-service
     working_dir: /workspace
     command: ./mvnw spring-boot:run
     environment:
-      SERVER_PORT: ${SERVER_PORT:-8080}
-      EMBEDDING_PROVIDER_URL: ${EMBEDDING_PROVIDER_URL:-http://host.docker.internal:11434/v1/embeddings}
-      EMBEDDING_TIMEOUT_MS: ${EMBEDDING_TIMEOUT_MS:-10000}
-      CACHE_TYPE: ${CACHE_TYPE:-sqlite}
-      SQLITE_PATH: ${SQLITE_PATH:-/data/sqlite/embedding-cache.db}
-      ROCKSDB_PATH: ${ROCKSDB_PATH:-/data/rocksdb/embedding-cache}
+      SERVER_PORT: ${SERVER_PORT:-8989}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-OLLAMA}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434/v1/embeddings}
+      OPENAI_URL: ${OPENAI_URL:-https://api.openai.com/v1/embeddings}
+      OPENROUTER_URL: ${OPENROUTER_URL:-https://openrouter.ai/api/v1/embeddings}
+      EMBEDDING_PROVIDER_API_KEY: ${EMBEDDING_PROVIDER_API_KEY:-}
+      OLLAMA_CONNECT_TIMEOUT: ${OLLAMA_CONNECT_TIMEOUT:-5s}
+      OLLAMA_REQUEST_TIMEOUT: ${OLLAMA_REQUEST_TIMEOUT:-30s}
+      EMBEDDING_MAX_BATCH_SIZE: ${EMBEDDING_MAX_BATCH_SIZE:-128}
+      EMBEDDING_MAX_INPUT_LENGTH: ${EMBEDDING_MAX_INPUT_LENGTH:-8192}
       DB_URL: ${DB_URL:-jdbc:postgresql://postgres:5432/embeddings}
       DB_USER: ${DB_USER:-embeddings}
       DB_PASSWORD: ${DB_PASSWORD:-embeddings}
     ports:
-      - "${SERVER_PORT:-8080}:8080"
+      - "${SERVER_PORT:-8989}:8989"
     volumes:
       - ./:/workspace
       - maven-cache:/root/.m2

@@ -1,13 +1,18 @@
-server.port: 8080
-server.error.include-message: always
+server.port: 8989
 
 app.embedding.max-batch-size: ${EMBEDDING_MAX_BATCH_SIZE:128}
 app.embedding.max-input-length: ${EMBEDDING_MAX_INPUT_LENGTH:8192}
 
+app.embedding.provider.type: ${EMBEDDING_PROVIDER:OLLAMA}
+app.embedding.provider.ollama-url: ${OLLAMA_URL:http://localhost:11434/v1/embeddings}
+app.embedding.provider.openai-url: ${OPENAI_URL:https://api.openai.com/v1/embeddings}
+app.embedding.provider.openrouter-url: ${OPENROUTER_URL:https://openrouter.ai/api/v1/embeddings}
+app.embedding.provider.api-key: ${EMBEDDING_PROVIDER_API_KEY:yxlkajnmdsdk}
 app.embedding.provider.connect-timeout: ${OLLAMA_CONNECT_TIMEOUT:5s}
 app.embedding.provider.request-timeout: ${OLLAMA_REQUEST_TIMEOUT:30s}
 
-spring.application.name: embedding-cache
+spring.application.name: lareferencia-embedding-service
+spring.web.error.include-message: always
 spring.datasource.url: ${DB_URL:jdbc:postgresql://localhost:5432/embeddings}
 spring.datasource.username: ${DB_USER:embeddings}
 spring.datasource.password: ${DB_PASSWORD:embeddings}
@@ -16,18 +21,12 @@ spring.jpa.hibernate.ddl-auto: update
 spring.jpa.open-in-view: false
 spring.jpa.properties.hibernate.jdbc.time_zone: UTC
 
-spring.ai.model.embedding: ollama
-spring.ai.vectorstore.pgvector.initialize-schema: true
-spring.ai.vectorstore.pgvector.schema-name: public
-spring.ai.vectorstore.pgvector.schema-validation: false
-spring.ai.vectorstore.pgvector.index-type: HNSW
-spring.ai.vectorstore.pgvector.distance-type: COSINE_DISTANCE
-spring.ai.vectorstore.pgvector.max-document-batch-size: 10000
-
-spring.ai.ollama.base-url: ${OLLAMA_BASE_URL:http://172.16.115.105:11434}
-spring.ai.ollama.embedding.options.model: ${OLLAMA_DEFAULT_MODEL:nomic-embed-text}
-spring.ai.ollama.init.pull-model-strategy: never
-spring.ai.ollama.init.timeout: ${OLLAMA_INIT_TIMEOUT:30s}
+app.pgvector.initialize-schema: true
+app.pgvector.schema-name: public
+app.pgvector.schema-validation: false
+app.pgvector.index-type: HNSW
+app.pgvector.distance-type: COSINE_DISTANCE
+app.pgvector.max-document-batch-size: 10000
 
 # Actuator Configuration
 management.endpoints.web.exposure.include: health,metrics,prometheus
@@ -35,4 +34,3 @@ management.metrics.tags.application: ${spring.application.name}
 
 logging.pattern.level: "%5p [requestId:%X{requestId}]"
 logging.level.org.lareferencia.embedding: INFO
-logging.level.org.springframework.ai: INFO

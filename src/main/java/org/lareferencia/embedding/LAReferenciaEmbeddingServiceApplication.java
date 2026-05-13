@@ -6,9 +6,9 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 @SpringBootApplication
 @ConfigurationPropertiesScan
-public class EmbeddingCacheApplication {
+public class LAReferenciaEmbeddingServiceApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(EmbeddingCacheApplication.class, args);
+		SpringApplication.run(LAReferenciaEmbeddingServiceApplication.class, args);
 	}
 }

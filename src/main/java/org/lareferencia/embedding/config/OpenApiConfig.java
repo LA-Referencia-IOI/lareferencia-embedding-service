@@ -12,17 +12,17 @@ import io.swagger.v3.oas.models.info.License;
 public class OpenApiConfig {
 
         @Bean
-        public OpenAPI embeddingCacheOpenAPI() {
+        public OpenAPI LAReferenciaEmbeddingServiceApplicationOpenAPI() {
                 return new OpenAPI()
                                 .info(new Info()
-                                                .title("LA Referencia Multi-Store Embeddings API")
-                                                .description("REST API for managing embedding stores and generating persistent cached embeddings with Spring AI, Ollama, PostgreSQL, and pgvector.")
+                                                .title("LA Referencia Multi-Storage Embeddings API")
+                                                .description("REST API for managing embedding storages and generating persistent cached embeddings with Spring AI, Ollama, PostgreSQL, and pgvector.")
                                                 .version("1.0.0")
                                                 .contact(new Contact()
                                                                 .name("LA Referencia")
                                                                 .url("https://www.lareferencia.info"))
                                                 .license(new License()
-                                                                .name("MIT License")
-                                                                .url("https://opensource.org/licenses/MIT")));
+                                                                .name("AGPL-3.0")
+                                                                .url("https://www.gnu.org/licenses/agpl-3.0.html")));
         }
 }

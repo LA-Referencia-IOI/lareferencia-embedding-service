@@ -1,4 +1,4 @@
-# LA Referencia Embedding Cache
+# LA Referencia Embedding Service
 
 A high-performance, deterministic embedding cache microservice designed to eliminate redundant embedding generation and optimize infrastructure costs for large-scale indexing pipelines.
 
@@ -8,13 +8,12 @@ A high-performance, deterministic embedding cache microservice designed to elimi
 - **Text Normalization (v1):** Applied before hashing to prevent minor formatting discrepancies (spaces, line breaks, etc.) from causing cache misses.
 - **OpenAI API Compatible:** Implements the standard OpenAI embedding response contract for seamless integration with existing AI tools.
 - **Batch Support:** Handles single strings or arrays of strings in a single request, preserving original input order.
-- **Spring AI Native Embeddings:** Uses Spring AI's `EmbeddingModel` API as the provider-neutral abstraction for embedding generation.
-- **Dimension-Aware PGvector Tables:** Defers per-store pgvector table creation until the first embedding is generated, then creates the table with the model's actual vector dimensions.
+- **Storage-Based Architecture:** Named storages bind a model and provider to a dedicated pgvector table. Create a storage first, then reference its UUID in embedding requests.
+- **Dimension-Aware PGvector Tables:** Embedding dimensions are resolved from the provider at storage creation time; the dedicated pgvector table is created immediately with the correct vector size.
 - **PostgreSQL + pgvector:** Persistent, scalable vector storage with built-in SQL queryability and auditability.
 - **Request Correlation IDs:** Automatic request tracing via MDC for end-to-end observability across logs.
 - **HTTP Timeouts:** Configurable connection and request timeouts for external embedding providers.
 - **Provider Abstraction:** Extensible interface for multiple embedding provider implementations.
-- **Read-Only Endpoints:** Easily query available provider models and perform direct cache lookups.
 
 ---
 
@@ -31,17 +30,20 @@ A high-performance, deterministic embedding cache microservice designed to elimi
 
 The application is configured via environment variables or `application.yml`. Default values are provided for local development.
 
-| Variable/Property                                       | Description                           | Default                                       |
-| :------------------------------------------------------ | :------------------------------------ | :-------------------------------------------- |
-| `SERVER_PORT` / `server.port`                           | Port the application runs on          | `8080`                                        |
-| `EMBEDDING_PROVIDER_URL` / `app.embedding.provider.url` | Upstream embedding API endpoint       | `http://localhost:11434/api/embed`            |
-| `DB_URL` / `spring.datasource.url`                      | PostgreSQL connection string          | `jdbc:postgresql://localhost:5432/embeddings` |
-| `DB_USER` / `spring.datasource.username`                | Database username                     | `embeddings`                                  |
-| `DB_PASSWORD` / `spring.datasource.password`            | Database password                     | `embeddings`                                  |
-| `app.embedding.provider.connect-timeout`                | HTTP connection timeout (seconds)     | `5`                                           |
-| `app.embedding.provider.request-timeout`                | HTTP request timeout (seconds)        | `30`                                          |
-| `app.embedding.max-batch-size`                          | Maximum strings per embedding request | `100`                                         |
-| `app.embedding.max-input-length`                        | Maximum characters per input string   | `8192`                                        |
+| Variable/Property                                          | Description                                          | Default                                       |
+| :--------------------------------------------------------- | :--------------------------------------------------- | :-------------------------------------------- |
+| `SERVER_PORT` / `server.port`                              | Port the application runs on                         | `8080`                                        |
+| `EMBEDDING_PROVIDER` / `app.embedding.provider.type`       | Provider selector (`OLLAMA`, `OPENAI`, `OPENROUTER`) | `OLLAMA`                                      |
+| `OLLAMA_URL` / `app.embedding.provider.ollama-url`         | Ollama embeddings endpoint                           | `http://localhost:11434/v1/embeddings`        |
+| `OPENAI_URL` / `app.embedding.provider.openai-url`         | OpenAI embeddings endpoint                           | `https://api.openai.com/v1/embeddings`        |
+| `OPENROUTER_URL` / `app.embedding.provider.openrouter-url` | OpenRouter embeddings endpoint                       | `https://openrouter.ai/api/v1/embeddings`     |
+| `DB_URL` / `spring.datasource.url`                         | PostgreSQL connection string                         | `jdbc:postgresql://localhost:5432/embeddings` |
+| `DB_USER` / `spring.datasource.username`                   | Database username                                    | `embeddings`                                  |
+| `DB_PASSWORD` / `spring.datasource.password`               | Database password                                    | `embeddings`                                  |
+| `app.embedding.provider.connect-timeout`                   | HTTP connection timeout (seconds)                    | `5`                                           |
+| `app.embedding.provider.request-timeout`                   | HTTP request timeout (seconds)                       | `30`                                          |
+| `app.embedding.max-batch-size`                             | Maximum strings per embedding request                | `100`                                         |
+| `app.embedding.max-input-length`                           | Maximum characters per input string                  | `8192`                                        |
 
 ---
 
@@ -75,7 +77,7 @@ Ensure the `pgvector` extension is enabled in PostgreSQL:
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-The application uses PostgreSQL for persistent vector storage with per-store tables created dynamically on first use. Tables are named `embeddings_<storeId>` and store vectors in `VECTOR` columns matching the model's embedding dimensions.
+The application uses PostgreSQL for persistent vector storage with per-storage tables created dynamically on first use. Tables are named `embeddings_<storageId>` and storage vectors in `VECTOR` columns matching the model's embedding dimensions.
 
 **Connection Configuration** (via environment or `application.yml`):
 
@@ -117,15 +119,51 @@ java -jar target/embedding-cache-0.0.1-SNAPSHOT.jar
 The API is fully documented using OpenAPI 3.0. When the application is running, you can access the interactive Swagger UI at:
 `http://localhost:8080/swagger-ui.html`
 
-### 1. Generate/Retrieve Embeddings
+### 1. Create a Storage
+
+**Endpoint:** `POST /api/v1/storages`
+
+Creates a named storage that binds a model to a dedicated pgvector table. Embedding dimensions are resolved from the provider at creation time.
+
+**Request:**
+
+```json
+{
+  "name": "my-storage",
+  "model": "qwen3-embedding:4b"
+}
+```
+
+**Response:**
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "my-storage",
+  "model": "qwen3-embedding:4b",
+  "provider": "OLLAMA",
+  "embeddingDimensions": 2560,
+  "createdAt": "2026-05-12T10:00:00Z"
+}
+```
+
+### 2. List Storages
+
+**Endpoint:** `GET /api/v1/storages`
+
+Returns all registered storages ordered by creation time.
+
+### 3. Generate/Retrieve Embeddings
 
 **Endpoint:** `POST /api/v1/embeddings`
+
+The `model` field must be the **UUID of an existing storage** (returned by `POST /api/v1/storages`).
 
 **Request (Single):**
 
 ```json
 {
-  "model": "qwen3-embedding:4b",
+  "model": "550e8400-e29b-41d4-a716-446655440000",
   "input": "Este es un texto académico"
 }
 ```
@@ -134,40 +172,30 @@ The API is fully documented using OpenAPI 3.0. When the application is running, 
 
 ```json
 {
-  "model": "qwen3-embedding:4b",
+  "model": "550e8400-e29b-41d4-a716-446655440000",
   "input": ["Texto 1", "Texto 2"]
 }
 ```
 
-**Response (OpenAI format):**
+**Response:**
 
 ```json
 {
+  "storageId": "550e8400-e29b-41d4-a716-446655440000",
+  "storageName": "my-storage",
+  "model": "qwen3-embedding:4b",
+  "provider": "OLLAMA",
   "object": "list",
   "data": [
     {
       "object": "embedding",
-      "embedding": [0.0012, -0.045, ...],
-      "index": 0
+      "index": 0,
+      "embedding": [0.0012, -0.045, "..."]
     }
   ],
-  "model": "qwen3-embedding:4b",
   "usage": { "prompt_tokens": 0, "total_tokens": 0 }
 }
 ```
-
-### 2. List Available Models
-
-**Endpoint:** `GET /api/v1/models`
-
-Queries the upstream provider and returns the list of models currently available for inference.
-
-### 3. Direct Cache Lookup
-
-**Endpoint:** `GET /api/v1/embeddings/{model:hash}`
-
-Retrieves a specific vector directly from the cache using its key.
-Example: `GET /api/v1/embeddings/qwen3-embedding:4b:45ab6734b21e6968`
 
 ---
 
@@ -183,5 +211,5 @@ Includes tests for:
 
 - **Text Normalizer:** Verifies formatting rules (trimming, Unicode normalization, etc.).
 - **Embedding Service:** Ensures cache-hit logic and order preservation for batch requests.
-- **Store Service:** Validates store creation, dimension probing, and table naming.
+- **Storage Service:** Validates storage creation, dimension probing, and table naming.
 - **PostgreSQL Integration:** Verifies pgvector storage and retrieval operations.
