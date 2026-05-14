@@ -19,13 +19,13 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "storages", uniqueConstraints = @UniqueConstraint(name = "uk_storage_name", columnNames = "name"))
+@Table(name = "stores", uniqueConstraints = @UniqueConstraint(name = "uk_store_name", columnNames = "name"))
 @Getter
 @Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class StorageEntity {
+public class StoreEntity {
 
   @Id
   @GeneratedValue(strategy = GenerationType.UUID)

@@ -15,8 +15,8 @@ import java.util.stream.Collectors;
 
 import com.pgvector.PGvector;
 
-import org.lareferencia.embedding.config.PgVectorStorageProperties;
-import org.lareferencia.embedding.service.StorageTableNamingService;
+import org.lareferencia.embedding.config.PgVectorStoreProperties;
+import org.lareferencia.embedding.service.StoreTableNamingService;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
@@ -35,25 +35,25 @@ public class EmbeddingRepository {
   private static final int MAX_HNSW_DIMENSIONS = 2000;
 
   private final JdbcTemplate jdbcTemplate;
-  private final StorageTableNamingService tableNamingService;
-  private final PgVectorStorageProperties pgVectorStorageProperties;
-  private final ConcurrentMap<StorageVectorKey, Boolean> initializedTables = new ConcurrentHashMap<>();
+  private final StoreTableNamingService tableNamingService;
+  private final PgVectorStoreProperties pgVectorStoreProperties;
+  private final ConcurrentMap<StoreVectorKey, Boolean> initializedTables = new ConcurrentHashMap<>();
   private final ConcurrentSkipListSet<String> initializedSchemas = new ConcurrentSkipListSet<>();
 
-  public void ensureStorageTableExists(UUID storageId, int embeddingDimensions, boolean createIndex) {
+  public void ensureStoreTableExists(UUID storeId, int embeddingDimensions, boolean createIndex) {
     if (embeddingDimensions <= 0) {
       throw new IllegalArgumentException("Embedding dimensions must be a positive number");
     }
 
-    String tableName = tableNamingService.tableName(storageId);
-    StorageVectorKey key = new StorageVectorKey(tableName, embeddingDimensions);
+    String tableName = tableNamingService.tableName(storeId);
+    StoreVectorKey key = new StoreVectorKey(tableName, embeddingDimensions);
     initializedTables.computeIfAbsent(key, ignored -> {
-      initializeStorageTable(storageId, tableName, embeddingDimensions, createIndex);
+      initializeStoreTable(storeId, tableName, embeddingDimensions, createIndex);
       return Boolean.TRUE;
     });
   }
 
-  public Map<String, float[]> findByHashes(UUID storageId, Integer embeddingDimensions, Collection<String> hashes) {
+  public Map<String, float[]> findByHashes(UUID storeId, Integer embeddingDimensions, Collection<String> hashes) {
     if (hashes == null || hashes.isEmpty()) {
       return Map.of();
     }
@@ -62,8 +62,8 @@ public class EmbeddingRepository {
       return Map.of();
     }
 
-    ensureStorageTableExists(storageId, embeddingDimensions, false);
-    String qualifiedTableName = qualifiedTableName(storageId);
+    ensureStoreTableExists(storeId, embeddingDimensions, false);
+    String qualifiedTableName = qualifiedTableName(storeId);
 
     List<String> orderedHashes = new ArrayList<>(hashes);
     String placeholders = orderedHashes.stream().map(ignored -> "?").collect(Collectors.joining(", "));
@@ -76,20 +76,20 @@ public class EmbeddingRepository {
         sql,
         (RowCallbackHandler) rs -> results.put(rs.getString("hash"), parseVector(rs.getString("embedding"))),
         orderedHashes.toArray());
-    log.debug("Database cache lookup storageId={} requestedHashes={} found={}", storageId, orderedHashes.size(),
+    log.debug("Database cache lookup storeId={} requestedHashes={} found={}", storeId, orderedHashes.size(),
         results.size());
     return results;
   }
 
-  public void saveEmbeddings(UUID storageId, int embeddingDimensions, Map<String, float[]> embeddingsByHash) {
+  public void saveEmbeddings(UUID storeId, int embeddingDimensions, Map<String, float[]> embeddingsByHash) {
     if (embeddingsByHash == null || embeddingsByHash.isEmpty()) {
       return;
     }
 
     embeddingsByHash.forEach(
         (hash, embedding) -> validateEmbedding(hash, embedding, embeddingDimensions));
-    ensureStorageTableExists(storageId, embeddingDimensions, false);
-    String qualifiedTableName = qualifiedTableName(storageId);
+    ensureStoreTableExists(storeId, embeddingDimensions, false);
+    String qualifiedTableName = qualifiedTableName(storeId);
     List<Map.Entry<String, float[]>> entries = new ArrayList<>(embeddingsByHash.entrySet());
     String sql = """
           INSERT INTO %s (id, embedding)
@@ -110,19 +110,19 @@ public class EmbeddingRepository {
         return entries.size();
       }
     });
-    log.debug("Persisted embeddings into database storageId={} rows={} table={}", storageId, entries.size(),
+    log.debug("Persisted embeddings into database storeId={} rows={} table={}", storeId, entries.size(),
         qualifiedTableName);
   }
 
-  private void initializeStorageTable(UUID storageId, String tableName, int embeddingDimensions, boolean createIndex) {
-    validateIdentifier(pgVectorStorageProperties.getSchemaName(), "schema name");
+  private void initializeStoreTable(UUID storeId, String tableName, int embeddingDimensions, boolean createIndex) {
+    validateIdentifier(pgVectorStoreProperties.getSchemaName(), "schema name");
     validateIdentifier(tableName, "table name");
 
-    if (pgVectorStorageProperties.isSchemaValidation()) {
-      validateSchemaExists(pgVectorStorageProperties.getSchemaName());
+    if (pgVectorStoreProperties.isSchemaValidation()) {
+      validateSchemaExists(pgVectorStoreProperties.getSchemaName());
     }
 
-    if (!pgVectorStorageProperties.isInitializeSchema()) {
+    if (!pgVectorStoreProperties.isInitializeSchema()) {
       return;
     }
 
@@ -136,8 +136,8 @@ public class EmbeddingRepository {
         """.formatted(qualifiedTableName, embeddingDimensions);
     jdbcTemplate.execute(createTableSql);
 
-    PgVectorStorageProperties.IndexType indexType = resolvedIndexType(embeddingDimensions);
-    if (createIndex && indexType != PgVectorStorageProperties.IndexType.NONE) {
+    PgVectorStoreProperties.IndexType indexType = resolvedIndexType(embeddingDimensions);
+    if (createIndex && indexType != PgVectorStoreProperties.IndexType.NONE) {
       String vectorIndexName = vectorIndexName(tableName);
       validateIdentifier(vectorIndexName, "index name");
       String vectorIndexSql = "CREATE INDEX IF NOT EXISTS %s ON %s USING %s (embedding %s)"
@@ -145,36 +145,36 @@ public class EmbeddingRepository {
               vectorIndexName,
               qualifiedTableName,
               indexMethod(indexType),
-              vectorOperatorClass(pgVectorStorageProperties.getDistanceType()));
+              vectorOperatorClass(pgVectorStoreProperties.getDistanceType()));
       jdbcTemplate.execute(vectorIndexSql);
     }
   }
 
-  private String qualifiedTableName(UUID storageId) {
-    String tableName = tableNamingService.tableName(storageId);
+  private String qualifiedTableName(UUID storeId) {
+    String tableName = tableNamingService.tableName(storeId);
     return qualifiedTableName(tableName);
   }
 
   private String qualifiedTableName(String tableName) {
-    validateIdentifier(pgVectorStorageProperties.getSchemaName(), "schema name");
+    validateIdentifier(pgVectorStoreProperties.getSchemaName(), "schema name");
     validateIdentifier(tableName, "table name");
-    return pgVectorStorageProperties.getSchemaName() + "." + tableName;
+    return pgVectorStoreProperties.getSchemaName() + "." + tableName;
   }
 
-  private PgVectorStorageProperties.IndexType resolvedIndexType(int embeddingDimensions) {
-    PgVectorStorageProperties.IndexType configuredIndexType = pgVectorStorageProperties.getIndexType();
-    if (configuredIndexType == PgVectorStorageProperties.IndexType.HNSW
+  private PgVectorStoreProperties.IndexType resolvedIndexType(int embeddingDimensions) {
+    PgVectorStoreProperties.IndexType configuredIndexType = pgVectorStoreProperties.getIndexType();
+    if (configuredIndexType == PgVectorStoreProperties.IndexType.HNSW
         && embeddingDimensions > MAX_HNSW_DIMENSIONS) {
       log.warn(
           "Disabling HNSW index for embedding dimensions={} because pgvector supports at most {} dimensions for HNSW",
           embeddingDimensions,
           MAX_HNSW_DIMENSIONS);
-      return PgVectorStorageProperties.IndexType.NONE;
+      return PgVectorStoreProperties.IndexType.NONE;
     }
     return configuredIndexType;
   }
 
-  private String indexMethod(PgVectorStorageProperties.IndexType indexType) {
+  private String indexMethod(PgVectorStoreProperties.IndexType indexType) {
     return switch (indexType) {
       case HNSW -> "HNSW";
       case IVFFLAT -> "IVFFLAT";
@@ -182,7 +182,7 @@ public class EmbeddingRepository {
     };
   }
 
-  private String vectorOperatorClass(PgVectorStorageProperties.DistanceType distanceType) {
+  private String vectorOperatorClass(PgVectorStoreProperties.DistanceType distanceType) {
     return switch (distanceType) {
       case COSINE_DISTANCE -> "vector_cosine_ops";
       case EUCLIDEAN_DISTANCE -> "vector_l2_ops";
@@ -234,6 +234,6 @@ public class EmbeddingRepository {
     }
   }
 
-  private record StorageVectorKey(String tableName, int embeddingDimensions) {
+  private record StoreVectorKey(String tableName, int embeddingDimensions) {
   }
 }

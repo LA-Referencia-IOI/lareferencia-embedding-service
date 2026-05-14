@@ -3,7 +3,7 @@ package org.lareferencia.embedding.dto;
 import java.time.Instant;
 import java.util.UUID;
 
-public record StorageResponse(
+public record StoreResponse(
     UUID id,
     String name,
     String model,

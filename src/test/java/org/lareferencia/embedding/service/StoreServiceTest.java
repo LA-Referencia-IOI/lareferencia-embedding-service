@@ -15,25 +15,25 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.lareferencia.embedding.dto.CreateStorageRequest;
-import org.lareferencia.embedding.dto.StorageResponse;
-import org.lareferencia.embedding.entity.StorageEntity;
+import org.lareferencia.embedding.dto.CreateStoreRequest;
+import org.lareferencia.embedding.dto.StoreResponse;
+import org.lareferencia.embedding.entity.StoreEntity;
 import org.lareferencia.embedding.exception.EmbeddingProviderException;
 import org.lareferencia.embedding.exception.InvalidRequestException;
-import org.lareferencia.embedding.exception.StorageAlreadyExistsException;
+import org.lareferencia.embedding.exception.StoreAlreadyExistsException;
 import org.lareferencia.embedding.repository.EmbeddingRepository;
-import org.lareferencia.embedding.repository.StorageRepository;
+import org.lareferencia.embedding.repository.StoreRepository;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
-class StorageServiceTest {
+class StoreServiceTest {
 
   private static final UUID STORE_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
   private static final UUID STORE_ID_2 = UUID.fromString("22222222-2222-2222-2222-222222222222");
 
   @Mock
-  private StorageRepository storageRepository;
+  private StoreRepository storeRepository;
 
   @Mock
   private EmbeddingProviderService embeddingProviderService;
@@ -41,20 +41,20 @@ class StorageServiceTest {
   @Mock
   private EmbeddingRepository embeddingRepository;
 
-  private StorageService storageService;
+  private StoreService storeService;
 
   @BeforeEach
   void setUp() {
-    when(storageRepository.findAll()).thenReturn(List.of());
-    storageService = new StorageService(storageRepository, embeddingProviderService, embeddingRepository);
-    storageService.loadStoragesIntoCache();
+    when(storeRepository.findAll()).thenReturn(List.of());
+    storeService = new StoreService(storeRepository, embeddingProviderService, embeddingRepository);
+    storeService.loadStoresIntoCache();
   }
 
   @Test
-  void createsStorageAfterValidatingModelAndAllocatingEmbeddingTable() {
+  void createsStoreAfterValidatingModelAndAllocatingEmbeddingTable() {
     when(embeddingProviderService.provider()).thenReturn("openrouter");
     when(embeddingProviderService.resolveDimensions("nomic-embed-text")).thenReturn(768);
-    when(storageRepository.save(any(StorageEntity.class))).thenReturn(StorageEntity.builder()
+    when(storeRepository.save(any(StoreEntity.class))).thenReturn(StoreEntity.builder()
         .id(STORE_ID)
         .name("publications")
         .model("nomic-embed-text")
@@ -63,75 +63,75 @@ class StorageServiceTest {
         .createdAt(Instant.now())
         .build());
 
-    StorageResponse response = storageService
-        .createStorage(new CreateStorageRequest("publications", "nomic-embed-text", null));
+    StoreResponse response = storeService
+        .createStore(new CreateStoreRequest("publications", "nomic-embed-text", null));
 
     assertEquals(STORE_ID, response.id());
     assertEquals("publications", response.name());
     assertEquals("nomic-embed-text", response.model());
     assertEquals("openrouter", response.provider());
     verify(embeddingProviderService).resolveDimensions("nomic-embed-text");
-    verify(embeddingRepository).ensureStorageTableExists(STORE_ID, 768, false);
+    verify(embeddingRepository).ensureStoreTableExists(STORE_ID, 768, false);
   }
 
   @Test
-  void rejectsDuplicateStorageNames() {
-    // Pre-populate cache with an existing storage
-    when(storageRepository.findAll()).thenReturn(List.of(
-        StorageEntity.builder().id(STORE_ID).name("publications").model("nomic-embed-text")
+  void rejectsDuplicateStoreNames() {
+    // Pre-populate cache with an existing store
+    when(storeRepository.findAll()).thenReturn(List.of(
+        StoreEntity.builder().id(STORE_ID).name("publications").model("nomic-embed-text")
             .provider("openrouter").createdAt(Instant.now()).build()));
-    storageService.loadStoragesIntoCache();
+    storeService.loadStoresIntoCache();
 
-    assertThrows(StorageAlreadyExistsException.class,
-        () -> storageService.createStorage(new CreateStorageRequest("publications", "nomic-embed-text", null)));
+    assertThrows(StoreAlreadyExistsException.class,
+        () -> storeService.createStore(new CreateStoreRequest("publications", "nomic-embed-text", null)));
   }
 
   @Test
-  void doesNotCreateStorageWhenProviderRejectsModel() {
+  void doesNotCreateStoreWhenProviderRejectsModel() {
     when(embeddingProviderService.provider()).thenReturn("openrouter");
     when(embeddingProviderService.resolveDimensions("missing-model"))
         .thenThrow(new EmbeddingProviderException("model 'missing-model' not found"));
 
     assertThrows(EmbeddingProviderException.class,
-        () -> storageService.createStorage(new CreateStorageRequest("publications", "missing-model", null)));
+        () -> storeService.createStore(new CreateStoreRequest("publications", "missing-model", null)));
 
-    verify(storageRepository, never()).save(any(StorageEntity.class));
-    verify(embeddingRepository, never()).ensureStorageTableExists(any(UUID.class), any(Integer.class), anyBoolean());
+    verify(storeRepository, never()).save(any(StoreEntity.class));
+    verify(embeddingRepository, never()).ensureStoreTableExists(any(UUID.class), any(Integer.class), anyBoolean());
   }
 
   @Test
-  void listsRegisteredStorages() {
-    when(storageRepository.findAll()).thenReturn(List.of(
-        StorageEntity.builder().id(STORE_ID).name("publications").model("nomic-embed-text")
+  void listsRegisteredStores() {
+    when(storeRepository.findAll()).thenReturn(List.of(
+        StoreEntity.builder().id(STORE_ID).name("publications").model("nomic-embed-text")
             .provider("openrouter").createdAt(Instant.now()).build(),
-        StorageEntity.builder().id(STORE_ID_2).name("repositories").model("mxbai-embed-large")
+        StoreEntity.builder().id(STORE_ID_2).name("repositories").model("mxbai-embed-large")
             .provider("openai").createdAt(Instant.now()).build()));
-    storageService.loadStoragesIntoCache();
+    storeService.loadStoresIntoCache();
 
-    List<StorageResponse> responses = storageService.listStorages();
+    List<StoreResponse> responses = storeService.listStores();
 
     assertEquals(2, responses.size());
   }
 
   @Test
   void persistsEmbeddingDimensionsWhenMissing() {
-    StorageEntity storage = StorageEntity.builder()
+    StoreEntity store = StoreEntity.builder()
         .id(STORE_ID)
         .name("publications")
         .model("nomic-embed-text")
         .provider("openrouter")
         .build();
 
-    int dimensions = storageService.ensureEmbeddingDimensions(storage, 768);
+    int dimensions = storeService.ensureEmbeddingDimensions(store, 768);
 
     assertEquals(768, dimensions);
-    assertEquals(768, storage.getEmbeddingDimensions());
-    verify(storageRepository).save(storage);
+    assertEquals(768, store.getEmbeddingDimensions());
+    verify(storeRepository).save(store);
   }
 
   @Test
   void rejectsMismatchedEmbeddingDimensions() {
-    StorageEntity storage = StorageEntity.builder()
+    StoreEntity store = StoreEntity.builder()
         .id(STORE_ID)
         .name("publications")
         .model("nomic-embed-text")
@@ -139,6 +139,6 @@ class StorageServiceTest {
         .embeddingDimensions(768)
         .build();
 
-    assertThrows(InvalidRequestException.class, () -> storageService.ensureEmbeddingDimensions(storage, 1024));
+    assertThrows(InvalidRequestException.class, () -> storeService.ensureEmbeddingDimensions(store, 1024));
   }
 }

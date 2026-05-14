@@ -3,7 +3,7 @@ package org.lareferencia.embedding.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "app.pgvector")
-public class PgVectorStorageProperties {
+public class PgVectorStoreProperties {
 
   private boolean initializeSchema = true;
 

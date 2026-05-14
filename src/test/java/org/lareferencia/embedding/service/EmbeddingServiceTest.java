@@ -28,7 +28,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.lareferencia.embedding.config.ApplicationProperties;
 import org.lareferencia.embedding.dto.GenerateEmbeddingsRequest;
 import org.lareferencia.embedding.dto.GenerateEmbeddingsResponse;
-import org.lareferencia.embedding.entity.StorageEntity;
+import org.lareferencia.embedding.entity.StoreEntity;
 import org.lareferencia.embedding.exception.EmbeddingProviderException;
 import org.lareferencia.embedding.repository.EmbeddingRepository;
 import org.lareferencia.embedding.util.PerKeyLockManager;
@@ -47,7 +47,7 @@ class EmbeddingServiceTest {
         private static final UUID STORE_ID_20 = UUID.fromString("20202020-2020-2020-2020-202020202020");
 
         @Mock
-        private StorageService storageService;
+        private StoreService storeService;
 
         @Mock
         private EmbeddingRepository embeddingRepository;
@@ -70,7 +70,7 @@ class EmbeddingServiceTest {
                 applicationProperties.setMaxBatchSize(8);
                 applicationProperties.setMaxInputLength(2000);
                 service = new EmbeddingService(
-                                storageService,
+                                storeService,
                                 embeddingRepository,
                                 hashService,
                                 ollamaEmbeddingService,
@@ -82,12 +82,12 @@ class EmbeddingServiceTest {
 
         @Test
         void generatesAndCachesMissingEmbeddings() {
-                StorageEntity storage = storage(STORE_ID_1, "publications", "nomic-embed-text");
+                StoreEntity store = store(STORE_ID_1, "publications", "nomic-embed-text");
                 String normalizedText = textNormalizer.normalize("Machine learning applied to repositories");
                 String hash = hashService.hash(normalizedText);
 
-                when(storageService.getRequiredStorage(STORE_ID_1)).thenReturn(storage);
-                when(storageService.ensureEmbeddingDimensions(storage, 3)).thenReturn(3);
+                when(storeService.getRequiredStore(STORE_ID_1)).thenReturn(store);
+                when(storeService.ensureEmbeddingDimensions(store, 3)).thenReturn(3);
                 when(embeddingRepository.findByHashes(eq(STORE_ID_1), eq(null), anyCollection()))
                                 .thenReturn(Map.of())
                                 .thenReturn(Map.of());
@@ -102,8 +102,8 @@ class EmbeddingServiceTest {
                                                 new TextNode("Machine learning applied to repositories")));
 
                 assertNotNull(response);
-                assertEquals(STORE_ID_1, response.storageId());
-                assertEquals("publications", response.storageName());
+                assertEquals(STORE_ID_1, response.storeId());
+                assertEquals("publications", response.storeName());
                 assertEquals("list", response.object());
                 assertEquals("nomic-embed-text", response.model());
                 assertEquals("ollama", response.provider());
@@ -121,7 +121,7 @@ class EmbeddingServiceTest {
 
         @Test
         void reusesCachedEmbeddingsAndDeduplicatesMissingTexts() {
-                StorageEntity storage = storage(STORE_ID_10, "publications", "nomic-embed-text");
+                StoreEntity store = store(STORE_ID_10, "publications", "nomic-embed-text");
                 String repeatedText = textNormalizer.normalize("cached text");
                 String missingText = textNormalizer.normalize("missing text");
                 String cachedHash = hashService.hash(repeatedText);
@@ -129,10 +129,10 @@ class EmbeddingServiceTest {
 
                 Map<String, float[]> firstLookup = new LinkedHashMap<>();
                 firstLookup.put(cachedHash, new float[] { 0.9f, 0.1f });
-                storage.setEmbeddingDimensions(2);
+                store.setEmbeddingDimensions(2);
 
-                when(storageService.getRequiredStorage(STORE_ID_10)).thenReturn(storage);
-                when(storageService.ensureEmbeddingDimensions(storage, 2)).thenReturn(2);
+                when(storeService.getRequiredStore(STORE_ID_10)).thenReturn(store);
+                when(storeService.ensureEmbeddingDimensions(store, 2)).thenReturn(2);
                 when(embeddingRepository.findByHashes(eq(STORE_ID_10), eq(2), anyCollection()))
                                 .thenReturn(firstLookup)
                                 .thenReturn(Map.of());
@@ -172,10 +172,10 @@ class EmbeddingServiceTest {
 
         @Test
         void rejectsInconsistentEmbeddingDimensionsFromProvider() {
-                StorageEntity storage = storage(STORE_ID_20, "publications", "nomic-embed-text");
-                storage.setEmbeddingDimensions(2);
+                StoreEntity store = store(STORE_ID_20, "publications", "nomic-embed-text");
+                store.setEmbeddingDimensions(2);
 
-                when(storageService.getRequiredStorage(STORE_ID_20)).thenReturn(storage);
+                when(storeService.getRequiredStore(STORE_ID_20)).thenReturn(store);
                 when(embeddingRepository.findByHashes(eq(STORE_ID_20), eq(2), anyCollection()))
                                 .thenReturn(Map.of())
                                 .thenReturn(Map.of());
@@ -195,8 +195,8 @@ class EmbeddingServiceTest {
                 verify(embeddingRepository, never()).saveEmbeddings(eq(STORE_ID_20), eq(2), anyMap());
         }
 
-        private StorageEntity storage(UUID id, String name, String model) {
-                return StorageEntity.builder()
+        private StoreEntity store(UUID id, String name, String model) {
+                return StoreEntity.builder()
                                 .id(id)
                                 .name(name)
                                 .model(model)

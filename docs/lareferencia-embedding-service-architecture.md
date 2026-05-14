@@ -12,8 +12,8 @@ The **LA Referencia Embedding Service** is a high-performance microservice desig
 
 - **Deterministic Caching:** Guarantees that identical input strings always yield the same cached vector.
 - **Batch Processing:** Supports array-based inputs in a single request while maintaining strict order preservation.
-- **In-Memory Storage Cache:** Registered storages are loaded into a `ConcurrentHashMap` at startup and kept in sync on writes, eliminating database round-trips on the hot embedding path.
-- **PostgreSQL + pgvector:** Uses PostgreSQL with the pgvector extension for persistent, scalable vector storage with native SQL queryability.
+- **In-Memory Store Cache:** Registered stores are loaded into a `ConcurrentHashMap` at startup and kept in sync on writes, eliminating database round-trips on the hot embedding path.
+- **PostgreSQL + pgvector:** Uses PostgreSQL with the pgvector extension for persistent, scalable vector store with native SQL queryability.
 
 ### 🛠️ Data Integrity
 
@@ -34,7 +34,7 @@ The following diagram illustrates the lifecycle of an embedding request:
 
 ```mermaid
 flowchart TD
-    A["String or List + Storage UUID"] --> B[Text Normalization v1]
+    A["String or List + Store UUID"] --> B[Text Normalization v1]
     B --> C["Hash Generation (xxHash64)"]
     C --> D{"Cache Lookup (PostgreSQL + pgvector)"}
 
@@ -62,22 +62,22 @@ To ensure deterministic hashing, the following rules are applied in order:
 
 ## 5. API Strategy
 
-The application follows a versioned API approach (`/api/v1`) to ensure long-term stability. Embedding generation is storage-scoped: callers first create a named storage (which resolves dimensions from the provider and creates the pgvector table), then submit embedding requests referencing the storage's UUID as the `model` field.
+The application follows a versioned API approach (`/api/v1`) to ensure long-term stability. Embedding generation is store-scoped: callers first create a named store's UUID as the `model` field.
 
-- **`POST /api/v1/storages`**: Create a named storage binding a model string to a dedicated pgvector table. The embedding provider is contacted at creation time to resolve model dimensions. Accepts an optional `createVectorIndex` boolean (default `false`) — set to `true` to create a pgvector index for similarity searches.
-- **`GET /api/v1/storages`**: List all registered storages.
-- **`POST /api/v1/embeddings`**: Main entry point for embedding generation/caching. The `model` field must be the UUID of an existing storage. The request body follows the OpenAI embeddings API format — a single string or an array of strings.
+- **`POST /api/v1/stores`**: Create a named store binding a model string to a dedicated pgvector table. The embedding provider is contacted at creation time to resolve model dimensions. Accepts an optional `createVectorIndex` boolean (default `false`) — set to `true` to create a pgvector index for similarity searches.
+- **`GET /api/v1/stores`**: List all registered stores.
+- **`POST /api/v1/embeddings`**: Main entry point for embedding generation/caching. The `model` field must be the UUID of an existing store. The request body follows the OpenAI embeddings API format — a single string or an array of strings.
 
 ---
 
-## 6. Storage & Scalability (PostgreSQL + pgvector)
+## 6. Store & Scalability (PostgreSQL + pgvector)
 
 PostgreSQL with `pgvector` provides:
 
 - **Native vector operations:** HNSW indexing, cosine distance, L2 distance
 - **SQL queryability:** Direct SQL access to embeddings and metadata for auditing and analysis
 - **Scalability:** Horizontal scaling through PostgreSQL replication, proven at 15+ million vectors
-- **Dimension flexibility:** Per-storage tables created with the actual model's vector dimensions
+- **Dimension flexibility:** Per-store tables created with the actual model's vector dimensions
 
 **Estimated Resource Requirements:**
 

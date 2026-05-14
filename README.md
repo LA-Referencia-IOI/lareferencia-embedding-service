@@ -8,10 +8,10 @@ A high-performance, deterministic embedding cache microservice designed to elimi
 - **Text Normalization (v1):** Applied before hashing to prevent minor formatting discrepancies (spaces, line breaks, etc.) from causing cache misses.
 - **OpenAI API Compatible:** Implements the standard OpenAI embedding response contract for seamless integration with existing AI tools.
 - **Batch Support:** Handles single strings or arrays of strings in a single request, preserving original input order.
-- **Storage-Based Architecture:** Named storages bind a model and provider to a dedicated pgvector table. Create a storage first, then reference its UUID in embedding requests.
-- **Dimension-Aware PGvector Tables:** Embedding dimensions are resolved from the provider at storage creation time; the dedicated pgvector table is created immediately with the correct vector size.
-- **PostgreSQL + pgvector:** Persistent, scalable vector storage with built-in SQL queryability and auditability.
-- **In-Memory Storage Cache:** Registered storages are loaded into memory at startup and kept in sync on writes, eliminating database round-trips on the hot embedding path.
+- **Store-Based Architecture:** Named stores bind a model and provider to a dedicated pgvector table. Create a store first, then reference its UUID in embedding requests.
+- **Dimension-Aware PGvector Tables:** Embedding dimensions are resolved from the provider at store creation time; the dedicated pgvector table is created immediately with the correct vector size.
+- **PostgreSQL + pgvector:** Persistent, scalable vector store with built-in SQL queryability and auditability.
+- **In-Memory Store Cache:** Registered stores are loaded into memory at startup and kept in sync on writes, eliminating database round-trips on the hot embedding path.
 - **HTTP Timeouts:** Configurable connection and request timeouts for external embedding providers.
 - **Provider Abstraction:** Extensible interface for multiple embedding provider implementations.
 
@@ -77,7 +77,7 @@ Ensure the `pgvector` extension is enabled in PostgreSQL:
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-The application uses PostgreSQL for persistent vector storage with per-storage tables created dynamically on first use. Tables are named `embeddings_<storageId>` and storage vectors in `VECTOR` columns matching the model's embedding dimensions.
+The application uses PostgreSQL for persistent vector store with per-store tables created dynamically on first use. Tables are named `embeddings_<storeId>` and store vectors in `VECTOR` columns matching the model's embedding dimensions.
 
 **Connection Configuration** (via environment or `application.yml`):
 
@@ -119,30 +119,30 @@ java -jar target/embedding-cache-0.0.1-SNAPSHOT.jar
 The API is fully documented using OpenAPI 3.0. When the application is running, you can access the interactive Swagger UI at:
 `http://localhost:8080/swagger-ui.html`
 
-### 1. Create a Storage
+### 1. Create a Store
 
-**Endpoint:** `POST /api/v1/storages`
+**Endpoint:** `POST /api/v1/stores`
 
-Creates a named storage that binds a model to a dedicated pgvector table. Embedding dimensions are resolved from the provider at creation time.
+Creates a named store that binds a model to a dedicated pgvector table. Embedding dimensions are resolved from the provider at creation time.
 
 **Request:**
 
 ```json
 {
-  "name": "my-storage",
+  "name": "my-store",
   "model": "qwen3-embedding:4b",
   "createVectorIndex": false
 }
 ```
 
-> `createVectorIndex` is optional and defaults to `false`. Set it to `true` to create a pgvector HNSW/IVFFLAT index on the embedding column — useful when you plan to perform similarity searches. For storages where embeddings are only retrieved by ID, omitting this parameter avoids the index overhead.
+> `createVectorIndex` is optional and defaults to `false`. Set it to `true` to create a pgvector HNSW/IVFFLAT index on the embedding column — useful when you plan to perform similarity searches. For stores where embeddings are only retrieved by ID, omitting this parameter avoids the index overhead.
 
 **Response:**
 
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
-  "name": "my-storage",
+  "name": "my-store",
   "model": "qwen3-embedding:4b",
   "provider": "OLLAMA",
   "embeddingDimensions": 2560,
@@ -150,17 +150,17 @@ Creates a named storage that binds a model to a dedicated pgvector table. Embedd
 }
 ```
 
-### 2. List Storages
+### 2. List Stores
 
-**Endpoint:** `GET /api/v1/storages`
+**Endpoint:** `GET /api/v1/stores`
 
-Returns all registered storages ordered by creation time.
+Returns all registered stores ordered by creation time.
 
 ### 3. Generate/Retrieve Embeddings
 
 **Endpoint:** `POST /api/v1/embeddings`
 
-The `model` field must be the **UUID of an existing storage** (returned by `POST /api/v1/storages`).
+The `model` field must be the **UUID of an existing store** (returned by `POST /api/v1/stores`).
 
 **Request (Single):**
 
@@ -184,8 +184,8 @@ The `model` field must be the **UUID of an existing storage** (returned by `POST
 
 ```json
 {
-  "storageId": "550e8400-e29b-41d4-a716-446655440000",
-  "storageName": "my-storage",
+  "storeId": "550e8400-e29b-41d4-a716-446655440000",
+  "storeName": "my-store",
   "model": "qwen3-embedding:4b",
   "provider": "OLLAMA",
   "object": "list",
@@ -214,5 +214,5 @@ Includes tests for:
 
 - **Text Normalizer:** Verifies formatting rules (trimming, Unicode normalization, etc.).
 - **Embedding Service:** Ensures cache-hit logic and order preservation for batch requests.
-- **Storage Service:** Validates storage creation, dimension probing, and table naming.
-- **PostgreSQL Integration:** Verifies pgvector storage and retrieval operations.
+- **Store Service:** Validates store creation, dimension probing, and table naming.
+- **PostgreSQL Integration:** Verifies pgvector store and retrieval operations.

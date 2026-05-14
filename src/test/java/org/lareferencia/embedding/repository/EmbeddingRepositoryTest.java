@@ -11,8 +11,8 @@ import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
-import org.lareferencia.embedding.config.PgVectorStorageProperties;
-import org.lareferencia.embedding.service.StorageTableNamingService;
+import org.lareferencia.embedding.config.PgVectorStoreProperties;
+import org.lareferencia.embedding.service.StoreTableNamingService;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -21,15 +21,15 @@ class EmbeddingRepositoryTest {
         private static final UUID STORE_ID_1 = UUID.fromString("11111111-1111-1111-1111-111111111111");
 
         @Test
-        void initializesStorageTablesThroughPureJdbcPgvector() {
+        void initializesStoreTablesThroughPureJdbcPgvector() {
                 JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
                 doNothing().when(jdbcTemplate).execute(any(String.class));
-                PgVectorStorageProperties properties = new PgVectorStorageProperties();
+                PgVectorStoreProperties properties = new PgVectorStoreProperties();
                 properties.setSchemaValidation(false);
                 EmbeddingRepository repository = new EmbeddingRepository(jdbcTemplate,
-                                new StorageTableNamingService(), properties);
+                                new StoreTableNamingService(), properties);
 
-                repository.ensureStorageTableExists(STORE_ID_1, 768, false);
+                repository.ensureStoreTableExists(STORE_ID_1, 768, false);
 
                 ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
                 verify(jdbcTemplate, times(1)).execute(sqlCaptor.capture());
@@ -46,13 +46,13 @@ class EmbeddingRepositoryTest {
         void disablesHnswIndexForEmbeddingsLargerThanTwoThousandDimensions() {
                 JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
                 doNothing().when(jdbcTemplate).execute(any(String.class));
-                PgVectorStorageProperties properties = new PgVectorStorageProperties();
+                PgVectorStoreProperties properties = new PgVectorStoreProperties();
                 properties.setSchemaValidation(false);
-                properties.setIndexType(PgVectorStorageProperties.IndexType.HNSW);
+                properties.setIndexType(PgVectorStoreProperties.IndexType.HNSW);
                 EmbeddingRepository repository = new EmbeddingRepository(jdbcTemplate,
-                                new StorageTableNamingService(), properties);
+                                new StoreTableNamingService(), properties);
 
-                repository.ensureStorageTableExists(STORE_ID_1, 2560, true);
+                repository.ensureStoreTableExists(STORE_ID_1, 2560, true);
 
                 ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
                 verify(jdbcTemplate, times(1)).execute(sqlCaptor.capture());

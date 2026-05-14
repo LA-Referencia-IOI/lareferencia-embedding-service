@@ -4,9 +4,9 @@ import java.util.List;
 
 import jakarta.validation.Valid;
 
-import org.lareferencia.embedding.dto.CreateStorageRequest;
-import org.lareferencia.embedding.dto.StorageResponse;
-import org.lareferencia.embedding.service.StorageService;
+import org.lareferencia.embedding.dto.CreateStoreRequest;
+import org.lareferencia.embedding.dto.StoreResponse;
+import org.lareferencia.embedding.service.StoreService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -22,29 +22,29 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 
 @RestController
-@RequestMapping("/api/v1/storages")
+@RequestMapping("/api/v1/stores")
 @RequiredArgsConstructor
-@Tag(name = "Storages", description = "Manage embedding storages and their associated embedding models")
-public class StorageController {
+@Tag(name = "Stores", description = "Manage embedding stores and their associated embedding models")
+public class StoreController {
 
-  private final StorageService storageService;
+  private final StoreService storeService;
 
-  @Operation(summary = "Create storage", description = "Creates a new embedding storage. Embedding dimensions and the dedicated pgvector table are initialized lazily during the first successful embeddings generation request.")
+  @Operation(summary = "Create store", description = "Creates a new embedding store. Embedding dimensions and the dedicated pgvector table are initialized lazily during the first successful embeddings generation request.")
   @ApiResponses({
-      @ApiResponse(responseCode = "201", description = "Storage created successfully"),
+      @ApiResponse(responseCode = "201", description = "Store created successfully"),
       @ApiResponse(responseCode = "400", description = "Invalid payload"),
-      @ApiResponse(responseCode = "409", description = "Storage name already exists"),
+      @ApiResponse(responseCode = "409", description = "Store name already exists"),
       @ApiResponse(responseCode = "502", description = "Embedding provider failed during a subsequent embeddings generation request")
   })
   @PostMapping
   @ResponseStatus(HttpStatus.CREATED)
-  public StorageResponse createStorage(@Valid @RequestBody CreateStorageRequest request) {
-    return storageService.createStorage(request);
+  public StoreResponse createStore(@Valid @RequestBody CreateStoreRequest request) {
+    return storeService.createStore(request);
   }
 
-  @Operation(summary = "List storages", description = "Returns all registered embedding storages.")
+  @Operation(summary = "List stores", description = "Returns all registered embedding stores.")
   @GetMapping
-  public List<StorageResponse> listStorages() {
-    return storageService.listStorages();
+  public List<StoreResponse> listStores() {
+    return storeService.listStores();
   }
 }

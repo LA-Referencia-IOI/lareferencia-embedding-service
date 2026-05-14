@@ -49,16 +49,16 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.BAD_REQUEST, "Constraint violation", request, details);
     }
 
-    @ExceptionHandler(StorageNotFoundException.class)
-    public ResponseEntity<ApiErrorResponse> handleStorageNotFound(
-            StorageNotFoundException ex,
+    @ExceptionHandler(StoreNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleStoreNotFound(
+            StoreNotFoundException ex,
             HttpServletRequest request) {
         return buildResponse(HttpStatus.NOT_FOUND, ex.getMessage(), request, List.of());
     }
 
-    @ExceptionHandler(StorageAlreadyExistsException.class)
-    public ResponseEntity<ApiErrorResponse> handleDuplicateStorage(
-            StorageAlreadyExistsException ex,
+    @ExceptionHandler(StoreAlreadyExistsException.class)
+    public ResponseEntity<ApiErrorResponse> handleDuplicateStore(
+            StoreAlreadyExistsException ex,
             HttpServletRequest request) {
         return buildResponse(HttpStatus.CONFLICT, ex.getMessage(), request, List.of());
     }

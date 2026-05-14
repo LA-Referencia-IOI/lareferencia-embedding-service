@@ -19,16 +19,16 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/v1/embeddings")
 @RequiredArgsConstructor
-@Tag(name = "Embeddings", description = "Generate embeddings with storage-aware persistent caching")
+@Tag(name = "Embeddings", description = "Generate embeddings with store-aware persistent caching")
 public class EmbeddingController {
 
     private final EmbeddingService embeddingService;
 
-    @Operation(summary = "Generate embeddings", description = "Generates embeddings for a single text or a batch of texts using the model configured for the selected storage. Cached vectors are returned when available.")
+    @Operation(summary = "Generate embeddings", description = "Generates embeddings for a single text or a batch of texts using the model configured for the selected store. Cached vectors are returned when available.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Embeddings generated or reused successfully"),
             @ApiResponse(responseCode = "400", description = "Invalid request payload"),
-            @ApiResponse(responseCode = "404", description = "Storage not found"),
+            @ApiResponse(responseCode = "404", description = "Store not found"),
             @ApiResponse(responseCode = "502", description = "Ollama provider failure")
     })
     @PostMapping
