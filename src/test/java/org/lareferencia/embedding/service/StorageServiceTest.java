@@ -3,6 +3,7 @@ package org.lareferencia.embedding.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -63,14 +64,14 @@ class StorageServiceTest {
         .build());
 
     StorageResponse response = storageService
-        .createStorage(new CreateStorageRequest("publications", "nomic-embed-text"));
+        .createStorage(new CreateStorageRequest("publications", "nomic-embed-text", null));
 
     assertEquals(STORE_ID, response.id());
     assertEquals("publications", response.name());
     assertEquals("nomic-embed-text", response.model());
     assertEquals("openrouter", response.provider());
     verify(embeddingProviderService).resolveDimensions("nomic-embed-text");
-    verify(embeddingRepository).ensureStorageTableExists(STORE_ID, 768);
+    verify(embeddingRepository).ensureStorageTableExists(STORE_ID, 768, false);
   }
 
   @Test
@@ -82,7 +83,7 @@ class StorageServiceTest {
     storageService.loadStoragesIntoCache();
 
     assertThrows(StorageAlreadyExistsException.class,
-        () -> storageService.createStorage(new CreateStorageRequest("publications", "nomic-embed-text")));
+        () -> storageService.createStorage(new CreateStorageRequest("publications", "nomic-embed-text", null)));
   }
 
   @Test
@@ -92,10 +93,10 @@ class StorageServiceTest {
         .thenThrow(new EmbeddingProviderException("model 'missing-model' not found"));
 
     assertThrows(EmbeddingProviderException.class,
-        () -> storageService.createStorage(new CreateStorageRequest("publications", "missing-model")));
+        () -> storageService.createStorage(new CreateStorageRequest("publications", "missing-model", null)));
 
     verify(storageRepository, never()).save(any(StorageEntity.class));
-    verify(embeddingRepository, never()).ensureStorageTableExists(any(UUID.class), any(Integer.class));
+    verify(embeddingRepository, never()).ensureStorageTableExists(any(UUID.class), any(Integer.class), anyBoolean());
   }
 
   @Test

@@ -59,7 +59,8 @@ public class StorageService {
         .provider(provider)
         .embeddingDimensions(embeddingDimensions)
         .build());
-    embeddingRepository.ensureStorageTableExists(savedStorage.getId(), embeddingDimensions);
+    embeddingRepository.ensureStorageTableExists(savedStorage.getId(), embeddingDimensions,
+        Boolean.TRUE.equals(request.createVectorIndex()));
     storageCache.put(savedStorage.getId(), savedStorage);
     log.info("Created embedding storage id={} name={} model={}", savedStorage.getId(), savedStorage.getName(),
         savedStorage.getModel());

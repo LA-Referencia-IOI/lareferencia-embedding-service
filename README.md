@@ -130,9 +130,12 @@ Creates a named storage that binds a model to a dedicated pgvector table. Embedd
 ```json
 {
   "name": "my-storage",
-  "model": "qwen3-embedding:4b"
+  "model": "qwen3-embedding:4b",
+  "createVectorIndex": false
 }
 ```
+
+> `createVectorIndex` is optional and defaults to `false`. Set it to `true` to create a pgvector HNSW/IVFFLAT index on the embedding column — useful when you plan to perform similarity searches. For storages where embeddings are only retrieved by ID, omitting this parameter avoids the index overhead.
 
 **Response:**
 

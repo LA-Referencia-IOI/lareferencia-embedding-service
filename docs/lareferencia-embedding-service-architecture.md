@@ -1,4 +1,4 @@
-# 🏗️ LA Referencia Embedding Service Architecture
+# LA Referencia Embedding Service Architecture
 
 ## 1. Overview
 
@@ -64,7 +64,7 @@ To ensure deterministic hashing, the following rules are applied in order:
 
 The application follows a versioned API approach (`/api/v1`) to ensure long-term stability. Embedding generation is storage-scoped: callers first create a named storage (which resolves dimensions from the provider and creates the pgvector table), then submit embedding requests referencing the storage's UUID as the `model` field.
 
-- **`POST /api/v1/storages`**: Create a named storage binding a model string to a dedicated pgvector table. The embedding provider is contacted at creation time to resolve model dimensions.
+- **`POST /api/v1/storages`**: Create a named storage binding a model string to a dedicated pgvector table. The embedding provider is contacted at creation time to resolve model dimensions. Accepts an optional `createVectorIndex` boolean (default `false`) — set to `true` to create a pgvector index for similarity searches.
 - **`GET /api/v1/storages`**: List all registered storages.
 - **`POST /api/v1/embeddings`**: Main entry point for embedding generation/caching. The `model` field must be the UUID of an existing storage. The request body follows the OpenAI embeddings API format — a single string or an array of strings.
 
@@ -109,6 +109,5 @@ These can be overridden via environment variables or `application.yml`.
 ## References
 
 - [PostgreSQL pgvector Extension](https://github.com/pgvector/pgvector)
-- [Ollama API Documentation](https://github.com/ollama/ollama/blob/main/docs/api.md)
-- [Ollama Documentation](https://ollama.ai/)
+- [Ollama API Documentation](https://docs.ollama.com/api/openai-compatibility)
 - [OpenAI Embeddings API](https://platform.openai.com/docs/guides/embeddings)

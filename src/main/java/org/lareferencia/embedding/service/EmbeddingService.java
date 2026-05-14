@@ -54,7 +54,7 @@ public class EmbeddingService {
                 storage.getModel(),
                 inputs.size());
         if (storage.getEmbeddingDimensions() != null) {
-            embeddingRepository.ensureStorageTableExists(storage.getId(), storage.getEmbeddingDimensions());
+            embeddingRepository.ensureStorageTableExists(storage.getId(), storage.getEmbeddingDimensions(), false);
         }
 
         List<String> normalizedInputs = inputs.stream()

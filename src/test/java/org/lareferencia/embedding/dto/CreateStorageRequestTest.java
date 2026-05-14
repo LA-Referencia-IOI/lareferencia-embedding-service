@@ -25,7 +25,7 @@ class CreateStorageRequestTest {
 
   @Test
   void allowsSpacesInStorageName() {
-    CreateStorageRequest request = new CreateStorageRequest("qwen3 embedding 4b", "nomic-embed-text");
+    CreateStorageRequest request = new CreateStorageRequest("qwen3 embedding 4b", "nomic-embed-text", null);
 
     Set<ConstraintViolation<CreateStorageRequest>> violations = validator.validate(request);
 
@@ -34,7 +34,7 @@ class CreateStorageRequestTest {
 
   @Test
   void rejectsUnsupportedCharactersInStorageName() {
-    CreateStorageRequest request = new CreateStorageRequest("qwen3.embedding.4b", "nomic-embed-text");
+    CreateStorageRequest request = new CreateStorageRequest("qwen3.embedding.4b", "nomic-embed-text", null);
 
     Set<ConstraintViolation<CreateStorageRequest>> violations = validator.validate(request);
 

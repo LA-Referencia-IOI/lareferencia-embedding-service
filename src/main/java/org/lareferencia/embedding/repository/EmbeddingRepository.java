@@ -20,6 +20,7 @@ import org.lareferencia.embedding.service.StorageTableNamingService;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
+import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Repository;
 
 import lombok.RequiredArgsConstructor;
@@ -39,7 +40,7 @@ public class EmbeddingRepository {
   private final ConcurrentMap<StorageVectorKey, Boolean> initializedTables = new ConcurrentHashMap<>();
   private final ConcurrentSkipListSet<String> initializedSchemas = new ConcurrentSkipListSet<>();
 
-  public void ensureStorageTableExists(UUID storageId, int embeddingDimensions) {
+  public void ensureStorageTableExists(UUID storageId, int embeddingDimensions, boolean createIndex) {
     if (embeddingDimensions <= 0) {
       throw new IllegalArgumentException("Embedding dimensions must be a positive number");
     }
@@ -47,7 +48,7 @@ public class EmbeddingRepository {
     String tableName = tableNamingService.tableName(storageId);
     StorageVectorKey key = new StorageVectorKey(tableName, embeddingDimensions);
     initializedTables.computeIfAbsent(key, ignored -> {
-      initializeStorageTable(storageId, tableName, embeddingDimensions);
+      initializeStorageTable(storageId, tableName, embeddingDimensions, createIndex);
       return Boolean.TRUE;
     });
   }
@@ -61,7 +62,7 @@ public class EmbeddingRepository {
       return Map.of();
     }
 
-    ensureStorageTableExists(storageId, embeddingDimensions);
+    ensureStorageTableExists(storageId, embeddingDimensions, false);
     String qualifiedTableName = qualifiedTableName(storageId);
 
     List<String> orderedHashes = new ArrayList<>(hashes);
@@ -87,7 +88,7 @@ public class EmbeddingRepository {
 
     embeddingsByHash.forEach(
         (hash, embedding) -> validateEmbedding(hash, embedding, embeddingDimensions));
-    ensureStorageTableExists(storageId, embeddingDimensions);
+    ensureStorageTableExists(storageId, embeddingDimensions, false);
     String qualifiedTableName = qualifiedTableName(storageId);
     List<Map.Entry<String, float[]>> entries = new ArrayList<>(embeddingsByHash.entrySet());
     String sql = """
@@ -98,7 +99,7 @@ public class EmbeddingRepository {
 
     jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
       @Override
-      public void setValues(PreparedStatement ps, int index) throws SQLException {
+      public void setValues(@NonNull PreparedStatement ps, int index) throws SQLException {
         Map.Entry<String, float[]> entry = entries.get(index);
         ps.setString(1, entry.getKey());
         ps.setObject(2, new PGvector(entry.getValue()));
@@ -113,7 +114,7 @@ public class EmbeddingRepository {
         qualifiedTableName);
   }
 
-  private void initializeStorageTable(UUID storageId, String tableName, int embeddingDimensions) {
+  private void initializeStorageTable(UUID storageId, String tableName, int embeddingDimensions, boolean createIndex) {
     validateIdentifier(pgVectorStorageProperties.getSchemaName(), "schema name");
     validateIdentifier(tableName, "table name");
 
@@ -136,7 +137,7 @@ public class EmbeddingRepository {
     jdbcTemplate.execute(createTableSql);
 
     PgVectorStorageProperties.IndexType indexType = resolvedIndexType(embeddingDimensions);
-    if (indexType != PgVectorStorageProperties.IndexType.NONE) {
+    if (createIndex && indexType != PgVectorStorageProperties.IndexType.NONE) {
       String vectorIndexName = vectorIndexName(tableName);
       validateIdentifier(vectorIndexName, "index name");
       String vectorIndexSql = "CREATE INDEX IF NOT EXISTS %s ON %s USING %s (embedding %s)"

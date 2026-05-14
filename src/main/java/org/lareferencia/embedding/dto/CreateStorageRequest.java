@@ -5,7 +5,9 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public record CreateStorageRequest(
-        @NotBlank(message = "Storage name is required") @Size(max = 100, message = "Storage name must have at most 100 characters") @Pattern(regexp = "^[a-zA-Z0-9_ -]+$", message = "Storage name may only contain letters, numbers, spaces, hyphens, and underscores") String name,
+                @NotBlank(message = "Storage name is required") @Size(max = 60, message = "Storage name must have at most 60 characters") @Pattern(regexp = "^[a-zA-Z0-9_ -]+$", message = "Storage name may only contain letters, numbers, spaces, hyphens, and underscores") String name,
 
-        @NotBlank(message = "Embedding model is required") @Size(max = 200, message = "Model name must have at most 200 characters") String model) {
+                @NotBlank(message = "Embedding model is required") @Size(max = 60, message = "Model name must have at most 60 characters") String model,
+
+                Boolean createVectorIndex) {
 }

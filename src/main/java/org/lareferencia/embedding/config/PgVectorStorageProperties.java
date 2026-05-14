@@ -11,7 +11,7 @@ public class PgVectorStorageProperties {
 
   private boolean schemaValidation = false;
 
-  private IndexType indexType = IndexType.HNSW;
+  private IndexType indexType = IndexType.NONE;
 
   private DistanceType distanceType = DistanceType.COSINE_DISTANCE;
 
