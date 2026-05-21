@@ -28,6 +28,7 @@ public class GlobalExceptionHandler {
         List<String> details = ex.getBindingResult().getFieldErrors().stream()
                 .map(this::formatFieldError)
                 .toList();
+        log.warn("Validation error path={} details={}", request.getRequestURI(), details);
         return buildResponse(HttpStatus.BAD_REQUEST, "Validation failed", request, details);
     }
 
@@ -36,6 +37,7 @@ public class GlobalExceptionHandler {
             HttpMessageNotReadableException ex,
             HttpServletRequest request) {
         String message = ex.getMostSpecificCause() != null ? ex.getMostSpecificCause().getMessage() : ex.getMessage();
+        log.warn("Unreadable payload path={} message={}", request.getRequestURI(), message);
         return buildResponse(HttpStatus.BAD_REQUEST, "Invalid JSON payload", request, List.of(message));
     }
 
@@ -46,6 +48,7 @@ public class GlobalExceptionHandler {
         List<String> details = ex.getConstraintViolations().stream()
                 .map(violation -> violation.getPropertyPath() + ": " + violation.getMessage())
                 .toList();
+        log.warn("Constraint violation path={} details={}", request.getRequestURI(), details);
         return buildResponse(HttpStatus.BAD_REQUEST, "Constraint violation", request, details);
     }
 
@@ -67,6 +70,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponse> handleInvalidRequest(
             InvalidRequestException ex,
             HttpServletRequest request) {
+        log.warn("Invalid request path={} message={}", request.getRequestURI(), ex.getMessage());
         return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage(), request, List.of());
     }
 

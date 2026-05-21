@@ -240,7 +240,8 @@ public class EmbeddingService {
         }
         if (inputs.size() > applicationProperties.getMaxBatchSize()) {
             throw new InvalidRequestException(
-                    "input batch size exceeds the configured maximum of " + applicationProperties.getMaxBatchSize());
+                    "input batch size " + inputs.size() + " exceeds the configured maximum of "
+                            + applicationProperties.getMaxBatchSize());
         }
 
         List<String> sanitizedInputs = new ArrayList<>(inputs.size());
