@@ -1,6 +1,7 @@
 package org.lareferencia.embedding.util;
 
 import java.text.Normalizer;
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
@@ -17,25 +18,31 @@ public class TextNormalizer {
     // Precompiling patterns saves CPU on bulk processing
     private static final Pattern LINE_BREAKS = Pattern.compile("[\\n\\r]+");
     private static final Pattern MULTIPLE_SPACES = Pattern.compile("\\s+");
+    private static final Pattern HYPHENATED_LINE_BREAK = Pattern.compile("-\\s*\\n\\s*");
 
     public String normalize(String input) {
-        if (input == null) {
-            return input;
-        }
-        if (input.isBlank()) {
+        if (input == null || input.isBlank()) {
             return "";
         }
 
-        // 1. Quick initial cleanup (Reduces String size for heavy steps)
         String normalized = input.trim();
 
-        // 2. Replace line breaks with spaces
+        // Join words split by hyphen + line break
+        // Example: "multi-\nlingual" -> "multilingual"
+        normalized = HYPHENATED_LINE_BREAK.matcher(normalized).replaceAll("");
+
+        // Lowercase normalization
+        normalized = normalized.toLowerCase(Locale.ROOT);
+
+        // Replace remaining line breaks with spaces
         normalized = LINE_BREAKS.matcher(normalized).replaceAll(" ");
 
-        // 3. Collapse multiple spaces
+        // Collapse multiple spaces/tabs/newlines
         normalized = MULTIPLE_SPACES.matcher(normalized).replaceAll(" ");
 
-        // 4. Unicode Normalization (NFC) - Guarantees "ç" vs "c + ̧"
-        return Normalizer.normalize(normalized, Normalizer.Form.NFC);
+        // Unicode normalization (ensures canonical representation)
+        normalized = Normalizer.normalize(normalized, Normalizer.Form.NFC);
+
+        return normalized;
     }
 }
