@@ -41,8 +41,8 @@ public class EmbeddingService {
     private final PerKeyLockManager perKeyLockManager;
 
     public GenerateEmbeddingsResponse generateEmbeddings(GenerateEmbeddingsRequest request) {
-        List<String> inputs = validateAndExtractInputs(request);
         StoreEntity store = storeService.getRequiredStore(request.model());
+        List<String> inputs = validateAndExtractInputs(request);
         Counter cacheHitCounter = cacheHitCounter(store);
         Counter cacheMissCounter = cacheMissCounter(store);
         Counter generationCounter = generationCounter(store);

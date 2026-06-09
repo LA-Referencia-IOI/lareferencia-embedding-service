@@ -2,14 +2,13 @@ package org.lareferencia.embedding.dto;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
 import jakarta.validation.constraints.NotNull;
 
 public record GenerateEmbeddingsRequest(
-    @NotNull(message = "model is required") UUID model,
+    @NotNull(message = "model name is required") String model,
 
     @NotNull(message = "input is required") JsonNode input) {
 

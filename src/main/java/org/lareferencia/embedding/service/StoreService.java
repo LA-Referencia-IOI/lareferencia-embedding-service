@@ -2,7 +2,6 @@ package org.lareferencia.embedding.service;
 
 import java.util.Comparator;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -31,11 +30,11 @@ public class StoreService {
   private final EmbeddingProviderService embeddingProviderService;
   private final EmbeddingRepository embeddingRepository;
 
-  private final ConcurrentMap<UUID, StoreEntity> storeCache = new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, StoreEntity> storeCache = new ConcurrentHashMap<>();
 
   @PostConstruct
   void loadStoresIntoCache() {
-    storeRepository.findAll().forEach(s -> storeCache.put(s.getId(), s));
+    storeRepository.findAll().forEach(s -> storeCache.put(s.getName(), s));
     log.info("Loaded {} store(s) into memory cache", storeCache.size());
   }
 
@@ -60,7 +59,7 @@ public class StoreService {
         .build());
     embeddingRepository.ensureStoreTableExists(savedStore.getId(), embeddingDimensions,
         Boolean.TRUE.equals(request.createVectorIndex()));
-    storeCache.put(savedStore.getId(), savedStore);
+    storeCache.put(savedStore.getName(), savedStore);
     log.info("Created embedding store id={} name={} model={}", savedStore.getId(), savedStore.getName(),
         savedStore.getModel());
     return toResponse(savedStore);
@@ -97,10 +96,10 @@ public class StoreService {
         .toList();
   }
 
-  public StoreEntity getRequiredStore(UUID storeId) {
-    StoreEntity store = storeCache.get(storeId);
+  public StoreEntity getRequiredStore(String storeName) {
+    StoreEntity store = storeCache.get(storeName);
     if (store == null) {
-      throw new StoreNotFoundException(storeId);
+      throw new StoreNotFoundException(storeName);
     }
     return store;
   }

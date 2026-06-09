@@ -86,7 +86,7 @@ class EmbeddingServiceTest {
                 String normalizedText = textNormalizer.normalize("Machine learning applied to repositories");
                 String hash = hashService.hash(normalizedText);
 
-                when(storeService.getRequiredStore(STORE_ID_1)).thenReturn(store);
+                when(storeService.getRequiredStore("publications")).thenReturn(store);
                 when(storeService.ensureEmbeddingDimensions(store, 3)).thenReturn(3);
                 when(embeddingRepository.findByHashes(eq(STORE_ID_1), eq(null), anyCollection()))
                                 .thenReturn(Map.of())
@@ -98,7 +98,7 @@ class EmbeddingServiceTest {
                                                 new EmbeddingProviderService.UsageData(8, 8)));
                 when(ollamaEmbeddingService.provider()).thenReturn("ollama");
                 GenerateEmbeddingsResponse response = service.generateEmbeddings(
-                                new GenerateEmbeddingsRequest(STORE_ID_1,
+                                new GenerateEmbeddingsRequest("publications",
                                                 new TextNode("Machine learning applied to repositories")));
 
                 assertNotNull(response);
@@ -131,7 +131,7 @@ class EmbeddingServiceTest {
                 firstLookup.put(cachedHash, new float[] { 0.9f, 0.1f });
                 store.setEmbeddingDimension(2);
 
-                when(storeService.getRequiredStore(STORE_ID_10)).thenReturn(store);
+                when(storeService.getRequiredStore("publications")).thenReturn(store);
                 when(storeService.ensureEmbeddingDimensions(store, 2)).thenReturn(2);
                 when(embeddingRepository.findByHashes(eq(STORE_ID_10), eq(2), anyCollection()))
                                 .thenReturn(firstLookup)
@@ -144,7 +144,7 @@ class EmbeddingServiceTest {
                 when(ollamaEmbeddingService.provider()).thenReturn("ollama");
 
                 GenerateEmbeddingsResponse response = service.generateEmbeddings(
-                                new GenerateEmbeddingsRequest(STORE_ID_10, JsonNodeFactory.instance.arrayNode()
+                                new GenerateEmbeddingsRequest("publications", JsonNodeFactory.instance.arrayNode()
                                                 .add("cached text")
                                                 .add("cached text")
                                                 .add("missing text")));
@@ -175,7 +175,7 @@ class EmbeddingServiceTest {
                 StoreEntity store = store(STORE_ID_20, "publications", "nomic-embed-text");
                 store.setEmbeddingDimension(2);
 
-                when(storeService.getRequiredStore(STORE_ID_20)).thenReturn(store);
+                when(storeService.getRequiredStore("publications")).thenReturn(store);
                 when(embeddingRepository.findByHashes(eq(STORE_ID_20), eq(2), anyCollection()))
                                 .thenReturn(Map.of())
                                 .thenReturn(Map.of());
@@ -189,7 +189,7 @@ class EmbeddingServiceTest {
                 when(ollamaEmbeddingService.provider()).thenReturn("ollama");
 
                 assertThrows(EmbeddingProviderException.class,
-                                () -> service.generateEmbeddings(new GenerateEmbeddingsRequest(STORE_ID_20,
+                                () -> service.generateEmbeddings(new GenerateEmbeddingsRequest("publications",
                                                 JsonNodeFactory.instance.arrayNode().add("alpha").add("beta"))));
 
                 verify(embeddingRepository, never()).saveEmbeddings(eq(STORE_ID_20), eq(2), anyMap());
