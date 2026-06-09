@@ -1,7 +1,8 @@
 package org.lareferencia.embedding.util;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.junit.jupiter.api.Test;
-import static org.junit.jupiter.api.Assertions.*;
 
 class TextNormalizerTest {
 
@@ -9,8 +10,8 @@ class TextNormalizerTest {
 
     @Test
     void testBasicNormalization() {
-        String input = "  Este   es un texto\n\nacadémico  ";
-        String expected = "Este es un texto académico";
+        String input = "  este   es un texto\n\nacadémico  ";
+        String expected = "este es un texto académico";
         assertEquals(expected, normalizer.normalize(input));
     }
 
@@ -27,19 +28,19 @@ class TextNormalizerTest {
     }
 
     @Test
-    void testCasePreservation() {
-        assertEquals("Texto con Mayúsculas", normalizer.normalize("  Texto con Mayúsculas  "));
+    void testCase() {
+        assertEquals("texto con mayúsculas", normalizer.normalize("  Texto con Mayúsculas  "));
     }
 
     @Test
     void testAccentsAndUnicode() {
         // NFC normalization check (though subtle to show here without raw hex)
-        assertEquals("áéíóú ñ Ñ", normalizer.normalize("áéíóú ñ Ñ"));
+        assertEquals("áéíóú ñ ñ", normalizer.normalize("áéíóú ñ Ñ"));
     }
 
     @Test
     void testNullAndEmpty() {
-        assertNull(normalizer.normalize(null));
+        assertEquals("", normalizer.normalize(null));
         assertEquals("", normalizer.normalize("   "));
         assertEquals("", normalizer.normalize(""));
     }

@@ -41,7 +41,7 @@ class EmbeddingProviderServiceTest {
         .andRespond(withServerError());
 
     EmbeddingProviderException exception = assertThrows(EmbeddingProviderException.class,
-        () -> service.embed(java.util.List.of("hello world"), "nomic-embed-text"));
+        () -> service.embed(java.util.List.of("hello world"), "nomic-embed-text", 3));
 
     assertTrue(exception.getMessage().contains("providerUrl=http://localhost:11434/v1/embeddings"));
     mockServer.verify();
@@ -65,7 +65,7 @@ class EmbeddingProviderServiceTest {
             "{\"data\":[{\"embedding\":[0.1,0.2,0.3],\"index\":0}],\"usage\":{\"prompt_tokens\":7,\"total_tokens\":7}}",
             MediaType.APPLICATION_JSON));
 
-    var result = openAiService.embed(java.util.List.of("hello world"), "text-embedding-3-small");
+    var result = openAiService.embed(java.util.List.of("hello world"), "text-embedding-3-small", 3);
     assertEquals("openai", result.provider());
     assertEquals(7, result.usage().promptTokens());
     assertEquals(7, result.usage().totalTokens());
@@ -81,7 +81,7 @@ class EmbeddingProviderServiceTest {
             "{\"data\":[{\"embedding\":[0.1,0.2],\"index\":0}],\"usage\":{\"prompt_eval_count\":4,\"eval_count\":4}}",
             MediaType.APPLICATION_JSON));
 
-    var result = service.embed(java.util.List.of("hello world"), "nomic-embed-text");
+    var result = service.embed(java.util.List.of("hello world"), "nomic-embed-text", 3);
     assertEquals("ollama", result.provider());
     assertEquals(0, result.usage().promptTokens());
     assertEquals(0, result.usage().totalTokens());
@@ -107,23 +107,10 @@ class EmbeddingProviderServiceTest {
             "{\"data\":[{\"embedding\":[0.1,0.2,0.3],\"index\":0}],\"usage\":{\"prompt_tokens\":6,\"total_tokens\":6}}",
             MediaType.APPLICATION_JSON));
 
-    var result = openRouterService.embed(java.util.List.of("hello world"), "text-embedding-3-small");
+    var result = openRouterService.embed(java.util.List.of("hello world"), "text-embedding-3-small", 3);
     assertEquals("openrouter", result.provider());
     assertEquals(6, result.usage().promptTokens());
     assertEquals(6, result.usage().totalTokens());
-    mockServer.verify();
-  }
-
-  @Test
-  void resolveDimensionsFailsAfterSingleProbeAttempt() {
-    mockServer.expect(requestTo("http://localhost:11434/v1/embeddings"))
-        .andRespond(withServerError().body(
-            "{\"error\":{\"message\":\"failed to encode response: json: unsupported value: NaN\"}}"));
-
-    EmbeddingProviderException exception = assertThrows(EmbeddingProviderException.class,
-        () -> service.resolveDimensions("nomic-embed-text"));
-
-    assertTrue(exception.getMessage().contains("after 1 probe attempts"));
     mockServer.verify();
   }
 }

@@ -43,6 +43,7 @@ public class StoreService {
   public StoreResponse createStore(CreateStoreRequest request) {
     String normalizedName = request.name().trim();
     String normalizedModel = request.model().trim();
+    int embeddingDimensions = request.dimension();
     String provider = embeddingProviderService.provider();
 
     boolean nameAlreadyExists = storeCache.values().stream()
@@ -51,13 +52,11 @@ public class StoreService {
       throw new StoreAlreadyExistsException(normalizedName);
     }
 
-    int embeddingDimensions = embeddingProviderService.resolveDimensions(normalizedModel);
-
     StoreEntity savedStore = storeRepository.save(StoreEntity.builder()
         .name(normalizedName)
         .model(normalizedModel)
         .provider(provider)
-        .embeddingDimensions(embeddingDimensions)
+        .embeddingDimension(embeddingDimensions)
         .build());
     embeddingRepository.ensureStoreTableExists(savedStore.getId(), embeddingDimensions,
         Boolean.TRUE.equals(request.createVectorIndex()));
@@ -73,7 +72,7 @@ public class StoreService {
       throw new InvalidRequestException("Embedding dimensions must be a positive number");
     }
 
-    Integer existingDimensions = store.getEmbeddingDimensions();
+    Integer existingDimensions = store.getEmbeddingDimension();
     if (existingDimensions != null) {
       if (existingDimensions != embeddingDimensions) {
         throw new InvalidRequestException("Embedding dimensions " + embeddingDimensions
@@ -82,7 +81,7 @@ public class StoreService {
       return existingDimensions;
     }
 
-    store.setEmbeddingDimensions(embeddingDimensions);
+    store.setEmbeddingDimension(embeddingDimensions);
     storeRepository.save(store);
     // store is the same reference stored in the cache, so the cache is already
     // updated
@@ -108,7 +107,7 @@ public class StoreService {
 
   private StoreResponse toResponse(StoreEntity store) {
     return new StoreResponse(store.getId(), store.getName(), store.getModel(), store.getProvider(),
-        store.getEmbeddingDimensions(),
+        store.getEmbeddingDimension(),
         store.getCreatedAt());
   }
 }

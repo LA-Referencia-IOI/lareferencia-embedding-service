@@ -25,7 +25,7 @@ class CreateStoreRequestTest {
 
   @Test
   void allowsSpacesInStoreName() {
-    CreateStoreRequest request = new CreateStoreRequest("qwen3 embedding 4b", "nomic-embed-text", null);
+    CreateStoreRequest request = new CreateStoreRequest("qwen3 embedding 4b", "nomic-embed-text", 3, null);
 
     Set<ConstraintViolation<CreateStoreRequest>> violations = validator.validate(request);
 
@@ -34,7 +34,7 @@ class CreateStoreRequestTest {
 
   @Test
   void rejectsUnsupportedCharactersInStoreName() {
-    CreateStoreRequest request = new CreateStoreRequest("qwen3.embedding.4b", "nomic-embed-text", null);
+    CreateStoreRequest request = new CreateStoreRequest("qwen3.embedding.4b", "nomic-embed-text", 3, null);
 
     Set<ConstraintViolation<CreateStoreRequest>> violations = validator.validate(request);
 

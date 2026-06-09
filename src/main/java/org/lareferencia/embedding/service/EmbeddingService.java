@@ -53,8 +53,8 @@ public class EmbeddingService {
                 store.getName(),
                 store.getModel(),
                 inputs.size());
-        if (store.getEmbeddingDimensions() != null) {
-            embeddingRepository.ensureStoreTableExists(store.getId(), store.getEmbeddingDimensions(), false);
+        if (store.getEmbeddingDimension() != null) {
+            embeddingRepository.ensureStoreTableExists(store.getId(), store.getEmbeddingDimension(), false);
         }
 
         List<String> normalizedInputs = inputs.stream()
@@ -66,7 +66,7 @@ public class EmbeddingService {
                 .toList();
 
         Map<String, float[]> cachedEmbeddings = embeddingRepository.findByHashes(store.getId(),
-                store.getEmbeddingDimensions(),
+                store.getEmbeddingDimension(),
                 new LinkedHashSet<>(hashes));
         String provider = embeddingProviderService.provider();
         GenerateEmbeddingsResponse.Usage usage = new GenerateEmbeddingsResponse.Usage(0, 0);
@@ -104,7 +104,7 @@ public class EmbeddingService {
                         store.getModel(),
                         missingByHash.size());
                 Map<String, float[]> cachedAfterLock = embeddingRepository.findByHashes(store.getId(),
-                        store.getEmbeddingDimensions(),
+                        store.getEmbeddingDimension(),
                         missingByHash.keySet());
                 LinkedHashMap<String, String> unresolvedByHash = new LinkedHashMap<>();
                 Map<String, float[]> resolvedEmbeddings = new LinkedHashMap<>(cachedAfterLock);
@@ -128,7 +128,8 @@ public class EmbeddingService {
                             unresolvedByHash.size());
                     Timer.Sample sample = Timer.start(meterRegistry);
                     EmbeddingProviderService.EmbeddingBatchResult generatedBatch = embeddingProviderService
-                            .embed(List.copyOf(unresolvedByHash.values()), store.getModel());
+                            .embed(List.copyOf(unresolvedByHash.values()), store.getModel(),
+                                    store.getEmbeddingDimension());
                     sample.stop(generationLatencyTimer);
 
                     provider = generatedBatch.provider();

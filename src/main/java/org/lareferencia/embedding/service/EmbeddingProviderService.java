@@ -21,12 +21,11 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class EmbeddingProviderService {
 
-  private static final List<String> DIMENSION_PROBE_CANDIDATES = List.of("dimension probe");
   private final RestClient embeddingRestClient;
   private final ObjectMapper objectMapper;
   private final EmbeddingProviderProperties ollamaClientProperties;
 
-  public EmbeddingBatchResult embed(List<String> inputs, String model) {
+  public EmbeddingBatchResult embed(List<String> inputs, String model, int dimension) {
     if (inputs == null || inputs.isEmpty()) {
       throw new EmbeddingProviderException("Input list for embeddings must not be empty");
     }
@@ -42,7 +41,7 @@ public class EmbeddingProviderService {
           .uri(providerEndpoint())
           .headers(this::applyAuthentication)
           .contentType(MediaType.APPLICATION_JSON)
-          .body(new OpenAiEmbeddingRequest(model, inputs))
+          .body(new EmbeddingRequest(model, inputs, dimension))
           .retrieve()
           .body(JsonNode.class);
 
@@ -69,34 +68,6 @@ public class EmbeddingProviderService {
           providerMessage, exception);
       throw new EmbeddingProviderException(providerMessage, exception);
     }
-  }
-
-  public int resolveDimensions(String model) {
-    log.info("Resolving embedding dimensions from provider provider={} model={}", providerName(), model);
-    EmbeddingProviderException lastFailure = null;
-
-    for (String probeText : DIMENSION_PROBE_CANDIDATES) {
-      try {
-        List<float[]> embeddings = embed(List.of(probeText), model).embeddings();
-        if (embeddings.isEmpty() || embeddings.get(0) == null || embeddings.get(0).length == 0) {
-          throw new EmbeddingProviderException(
-              "Embedding provider returned an empty embedding while probing model " + model);
-        }
-        int dimensions = embeddings.get(0).length;
-        log.info("Resolved embedding dimensions from provider provider={} model={} dimensions={} probe=\"{}\"",
-            providerName(), model, dimensions, probeText);
-        return dimensions;
-      } catch (EmbeddingProviderException exception) {
-        lastFailure = exception;
-        log.warn("Dimension probe failed provider={} model={} probe=\"{}\" message={}",
-            providerName(), model, probeText, exception.getMessage());
-      }
-    }
-
-    throw new EmbeddingProviderException(
-        "Failed to resolve embedding dimensions for model " + model + " after "
-            + DIMENSION_PROBE_CANDIDATES.size() + " probe attempts",
-        lastFailure);
   }
 
   private String resolveProviderMessage(RuntimeException exception) {
@@ -204,7 +175,7 @@ public class EmbeddingProviderService {
     return url;
   }
 
-  private record OpenAiEmbeddingRequest(String model, List<String> input) {
+  private record EmbeddingRequest(String model, List<String> input, int dimensions) {
   }
 
   public record UsageData(int promptTokens, int totalTokens) {

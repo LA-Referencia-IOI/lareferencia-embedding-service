@@ -53,24 +53,22 @@ class StoreServiceTest {
   @Test
   void createsStoreAfterValidatingModelAndAllocatingEmbeddingTable() {
     when(embeddingProviderService.provider()).thenReturn("openrouter");
-    when(embeddingProviderService.resolveDimensions("nomic-embed-text")).thenReturn(768);
     when(storeRepository.save(any(StoreEntity.class))).thenReturn(StoreEntity.builder()
         .id(STORE_ID)
         .name("publications")
         .model("nomic-embed-text")
         .provider("openrouter")
-        .embeddingDimensions(768)
+        .embeddingDimension(768)
         .createdAt(Instant.now())
         .build());
 
     StoreResponse response = storeService
-        .createStore(new CreateStoreRequest("publications", "nomic-embed-text", null));
+        .createStore(new CreateStoreRequest("publications", "nomic-embed-text", 768, false));
 
     assertEquals(STORE_ID, response.id());
     assertEquals("publications", response.name());
     assertEquals("nomic-embed-text", response.model());
     assertEquals("openrouter", response.provider());
-    verify(embeddingProviderService).resolveDimensions("nomic-embed-text");
     verify(embeddingRepository).ensureStoreTableExists(STORE_ID, 768, false);
   }
 
@@ -83,17 +81,15 @@ class StoreServiceTest {
     storeService.loadStoresIntoCache();
 
     assertThrows(StoreAlreadyExistsException.class,
-        () -> storeService.createStore(new CreateStoreRequest("publications", "nomic-embed-text", null)));
+        () -> storeService.createStore(new CreateStoreRequest("publications", "nomic-embed-text", 768, false)));
   }
 
   @Test
   void doesNotCreateStoreWhenProviderRejectsModel() {
     when(embeddingProviderService.provider()).thenReturn("openrouter");
-    when(embeddingProviderService.resolveDimensions("missing-model"))
-        .thenThrow(new EmbeddingProviderException("model 'missing-model' not found"));
 
     assertThrows(EmbeddingProviderException.class,
-        () -> storeService.createStore(new CreateStoreRequest("publications", "missing-model", null)));
+        () -> storeService.createStore(new CreateStoreRequest("publications", "missing-model", 768, false)));
 
     verify(storeRepository, never()).save(any(StoreEntity.class));
     verify(embeddingRepository, never()).ensureStoreTableExists(any(UUID.class), any(Integer.class), anyBoolean());
@@ -125,7 +121,7 @@ class StoreServiceTest {
     int dimensions = storeService.ensureEmbeddingDimensions(store, 768);
 
     assertEquals(768, dimensions);
-    assertEquals(768, store.getEmbeddingDimensions());
+    assertEquals(768, store.getEmbeddingDimension());
     verify(storeRepository).save(store);
   }
 
@@ -136,7 +132,7 @@ class StoreServiceTest {
         .name("publications")
         .model("nomic-embed-text")
         .provider("openrouter")
-        .embeddingDimensions(768)
+        .embeddingDimension(768)
         .build();
 
     assertThrows(InvalidRequestException.class, () -> storeService.ensureEmbeddingDimensions(store, 1024));

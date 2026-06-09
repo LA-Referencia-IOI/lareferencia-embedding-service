@@ -91,7 +91,7 @@ class EmbeddingServiceTest {
                 when(embeddingRepository.findByHashes(eq(STORE_ID_1), eq(null), anyCollection()))
                                 .thenReturn(Map.of())
                                 .thenReturn(Map.of());
-                when(ollamaEmbeddingService.embed(List.of(normalizedText), "nomic-embed-text"))
+                when(ollamaEmbeddingService.embed(List.of(normalizedText), "nomic-embed-text", 3))
                                 .thenReturn(new EmbeddingProviderService.EmbeddingBatchResult(
                                                 List.of(new float[] { 0.1f, 0.2f, 0.3f }),
                                                 "ollama",
@@ -114,7 +114,7 @@ class EmbeddingServiceTest {
                 assertEquals(List.of(0.10000000149011612d, 0.20000000298023224d, 0.30000001192092896d),
                                 response.data().get(0).embedding());
 
-                verify(ollamaEmbeddingService, times(1)).embed(List.of(normalizedText), "nomic-embed-text");
+                verify(ollamaEmbeddingService, times(1)).embed(List.of(normalizedText), "nomic-embed-text", 3);
                 verify(embeddingRepository).saveEmbeddings(eq(STORE_ID_1), eq(3), argThat(map -> map.size() == 1
                                 && Arrays.equals(map.get(hash), new float[] { 0.1f, 0.2f, 0.3f })));
         }
@@ -129,14 +129,14 @@ class EmbeddingServiceTest {
 
                 Map<String, float[]> firstLookup = new LinkedHashMap<>();
                 firstLookup.put(cachedHash, new float[] { 0.9f, 0.1f });
-                store.setEmbeddingDimensions(2);
+                store.setEmbeddingDimension(2);
 
                 when(storeService.getRequiredStore(STORE_ID_10)).thenReturn(store);
                 when(storeService.ensureEmbeddingDimensions(store, 2)).thenReturn(2);
                 when(embeddingRepository.findByHashes(eq(STORE_ID_10), eq(2), anyCollection()))
                                 .thenReturn(firstLookup)
                                 .thenReturn(Map.of());
-                when(ollamaEmbeddingService.embed(List.of(missingText), "nomic-embed-text"))
+                when(ollamaEmbeddingService.embed(List.of(missingText), "nomic-embed-text", 2))
                                 .thenReturn(new EmbeddingProviderService.EmbeddingBatchResult(
                                                 List.of(new float[] { 0.2f, 0.4f }),
                                                 "ollama",
@@ -162,7 +162,7 @@ class EmbeddingServiceTest {
                 assertEquals(List.of(0.8999999761581421d, 0.10000000149011612d), response.data().get(1).embedding());
                 assertEquals(List.of(0.20000000298023224d, 0.4000000059604645d), response.data().get(2).embedding());
 
-                verify(ollamaEmbeddingService, times(1)).embed(List.of(missingText), "nomic-embed-text");
+                verify(ollamaEmbeddingService, times(1)).embed(List.of(missingText), "nomic-embed-text", 2);
                 verify(embeddingRepository).saveEmbeddings(eq(STORE_ID_10), eq(2), argThat(map -> map.size() == 1
                                 && map.containsKey(missingHash)
                                 && Arrays.equals(map.get(missingHash), new float[] { 0.2f, 0.4f })));
@@ -173,7 +173,7 @@ class EmbeddingServiceTest {
         @Test
         void rejectsInconsistentEmbeddingDimensionsFromProvider() {
                 StoreEntity store = store(STORE_ID_20, "publications", "nomic-embed-text");
-                store.setEmbeddingDimensions(2);
+                store.setEmbeddingDimension(2);
 
                 when(storeService.getRequiredStore(STORE_ID_20)).thenReturn(store);
                 when(embeddingRepository.findByHashes(eq(STORE_ID_20), eq(2), anyCollection()))
@@ -181,7 +181,7 @@ class EmbeddingServiceTest {
                                 .thenReturn(Map.of());
                 when(ollamaEmbeddingService.embed(
                                 List.of(textNormalizer.normalize("alpha"), textNormalizer.normalize("beta")),
-                                "nomic-embed-text"))
+                                "nomic-embed-text", 2))
                                 .thenReturn(new EmbeddingProviderService.EmbeddingBatchResult(
                                                 List.of(new float[] { 0.1f, 0.2f }, new float[] { 0.3f }),
                                                 "ollama",

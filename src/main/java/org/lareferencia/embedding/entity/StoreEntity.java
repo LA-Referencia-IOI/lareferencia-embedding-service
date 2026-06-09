@@ -40,8 +40,8 @@ public class StoreEntity {
   @Column(name = "provider", nullable = false, length = 20)
   private String provider;
 
-  @Column(name = "embedding_dimensions")
-  private Integer embeddingDimensions;
+  @Column(name = "embedding_dimension")
+  private Integer embeddingDimension;
 
   @Column(name = "created_at", nullable = false, updatable = false)
   private Instant createdAt;
