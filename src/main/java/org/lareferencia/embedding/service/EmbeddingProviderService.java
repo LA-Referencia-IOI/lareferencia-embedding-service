@@ -25,7 +25,7 @@ public class EmbeddingProviderService {
   private final ObjectMapper objectMapper;
   private final EmbeddingProviderProperties ollamaClientProperties;
 
-  public EmbeddingBatchResult embed(List<String> inputs, String model, int dimension) {
+  public EmbeddingBatchResult embed(List<String> inputs, String model, int dimensions) {
     if (inputs == null || inputs.isEmpty()) {
       throw new EmbeddingProviderException("Input list for embeddings must not be empty");
     }
@@ -41,7 +41,7 @@ public class EmbeddingProviderService {
           .uri(providerEndpoint())
           .headers(this::applyAuthentication)
           .contentType(MediaType.APPLICATION_JSON)
-          .body(new EmbeddingRequest(model, inputs, dimension))
+          .body(new EmbeddingRequest(model, inputs, dimensions))
           .retrieve()
           .body(JsonNode.class);
 

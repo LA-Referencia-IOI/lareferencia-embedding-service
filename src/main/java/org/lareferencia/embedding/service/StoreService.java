@@ -42,8 +42,7 @@ public class StoreService {
   public StoreResponse createStore(CreateStoreRequest request) {
     String normalizedName = request.name().trim();
     String normalizedModel = request.model().trim();
-    int embeddingDimensions = request.dimension();
-    String provider = embeddingProviderService.provider();
+    int embeddingDimensions = request.dimensions();
 
     boolean nameAlreadyExists = storeCache.values().stream()
         .anyMatch(s -> s.getName().equalsIgnoreCase(normalizedName));
@@ -51,6 +50,14 @@ public class StoreService {
       throw new StoreAlreadyExistsException(normalizedName);
     }
 
+    boolean modelAndDimensionsAlreadyExists = storeCache.values().stream()
+        .anyMatch(s -> s.getModel().equalsIgnoreCase(normalizedModel)
+            && Integer.valueOf(embeddingDimensions).equals(s.getEmbeddingDimension()));
+    if (modelAndDimensionsAlreadyExists) {
+      throw new StoreAlreadyExistsException(normalizedModel, embeddingDimensions);
+    }
+
+    String provider = embeddingProviderService.provider();
     StoreEntity savedStore = storeRepository.save(StoreEntity.builder()
         .name(normalizedName)
         .model(normalizedModel)
@@ -102,6 +109,21 @@ public class StoreService {
       throw new StoreNotFoundException(storeName);
     }
     return store;
+  }
+
+  public StoreEntity getRequiredStore(String model, int embeddingDimensions) {
+    List<StoreEntity> matches = storeCache.values().stream()
+        .filter(s -> s.getModel().equalsIgnoreCase(model)
+            && Integer.valueOf(embeddingDimensions).equals(s.getEmbeddingDimension()))
+        .toList();
+    if (matches.isEmpty()) {
+      throw new StoreNotFoundException(model, embeddingDimensions);
+    }
+    if (matches.size() > 1) {
+      throw new InvalidRequestException(
+          "Multiple embedding stores found for model '" + model + "' and dimensions " + embeddingDimensions);
+    }
+    return matches.getFirst();
   }
 
   private StoreResponse toResponse(StoreEntity store) {

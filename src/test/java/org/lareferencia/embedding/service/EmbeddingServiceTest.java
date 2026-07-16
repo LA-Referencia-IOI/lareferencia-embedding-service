@@ -83,12 +83,13 @@ class EmbeddingServiceTest {
         @Test
         void generatesAndCachesMissingEmbeddings() {
                 StoreEntity store = store(STORE_ID_1, "publications", "nomic-embed-text");
+                store.setEmbeddingDimension(3);
                 String normalizedText = textNormalizer.normalize("Machine learning applied to repositories");
                 String hash = hashService.hash(normalizedText);
 
-                when(storeService.getRequiredStore("publications")).thenReturn(store);
+                when(storeService.getRequiredStore("nomic-embed-text", 3)).thenReturn(store);
                 when(storeService.ensureEmbeddingDimensions(store, 3)).thenReturn(3);
-                when(embeddingRepository.findByHashes(eq(STORE_ID_1), eq(null), anyCollection()))
+                when(embeddingRepository.findByHashes(eq(STORE_ID_1), eq(3), anyCollection()))
                                 .thenReturn(Map.of())
                                 .thenReturn(Map.of());
                 when(ollamaEmbeddingService.embed(List.of(normalizedText), "nomic-embed-text", 3))
@@ -98,7 +99,7 @@ class EmbeddingServiceTest {
                                                 new EmbeddingProviderService.UsageData(8, 8)));
                 when(ollamaEmbeddingService.provider()).thenReturn("ollama");
                 GenerateEmbeddingsResponse response = service.generateEmbeddings(
-                                new GenerateEmbeddingsRequest("publications",
+                                new GenerateEmbeddingsRequest("nomic-embed-text", 3,
                                                 new TextNode("Machine learning applied to repositories")));
 
                 assertNotNull(response);
@@ -131,7 +132,7 @@ class EmbeddingServiceTest {
                 firstLookup.put(cachedHash, new float[] { 0.9f, 0.1f });
                 store.setEmbeddingDimension(2);
 
-                when(storeService.getRequiredStore("publications")).thenReturn(store);
+                when(storeService.getRequiredStore("nomic-embed-text", 2)).thenReturn(store);
                 when(storeService.ensureEmbeddingDimensions(store, 2)).thenReturn(2);
                 when(embeddingRepository.findByHashes(eq(STORE_ID_10), eq(2), anyCollection()))
                                 .thenReturn(firstLookup)
@@ -144,7 +145,7 @@ class EmbeddingServiceTest {
                 when(ollamaEmbeddingService.provider()).thenReturn("ollama");
 
                 GenerateEmbeddingsResponse response = service.generateEmbeddings(
-                                new GenerateEmbeddingsRequest("publications", JsonNodeFactory.instance.arrayNode()
+                                new GenerateEmbeddingsRequest("nomic-embed-text", 2, JsonNodeFactory.instance.arrayNode()
                                                 .add("cached text")
                                                 .add("cached text")
                                                 .add("missing text")));
@@ -175,7 +176,7 @@ class EmbeddingServiceTest {
                 StoreEntity store = store(STORE_ID_20, "publications", "nomic-embed-text");
                 store.setEmbeddingDimension(2);
 
-                when(storeService.getRequiredStore("publications")).thenReturn(store);
+                when(storeService.getRequiredStore("nomic-embed-text", 2)).thenReturn(store);
                 when(embeddingRepository.findByHashes(eq(STORE_ID_20), eq(2), anyCollection()))
                                 .thenReturn(Map.of())
                                 .thenReturn(Map.of());
@@ -189,7 +190,7 @@ class EmbeddingServiceTest {
                 when(ollamaEmbeddingService.provider()).thenReturn("ollama");
 
                 assertThrows(EmbeddingProviderException.class,
-                                () -> service.generateEmbeddings(new GenerateEmbeddingsRequest("publications",
+                                () -> service.generateEmbeddings(new GenerateEmbeddingsRequest("nomic-embed-text", 2,
                                                 JsonNodeFactory.instance.arrayNode().add("alpha").add("beta"))));
 
                 verify(embeddingRepository, never()).saveEmbeddings(eq(STORE_ID_20), eq(2), anyMap());

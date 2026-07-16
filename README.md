@@ -1,218 +1,325 @@
 # LA Referencia Embedding Service
 
-A high-performance, deterministic embedding cache microservice designed to eliminate redundant embedding generation and optimize infrastructure costs for large-scale indexing pipelines.
+A Spring Boot service that exposes an OpenAI-style embeddings API backed by a
+PostgreSQL + pgvector cache. Clients create a named store for a provider model
+and dimensions, then request embeddings by passing that model and dimensions.
 
-## Key Features
+The service normalizes input text, hashes it deterministically, reuses cached
+vectors when available, and only calls the configured embedding provider for
+cache misses.
 
-- **Deterministic Caching:** Ensures identical input strings always map to the same cached embedding.
-- **Text Normalization (v1):** Applied before hashing to prevent minor formatting discrepancies (spaces, line breaks, etc.) from causing cache misses.
-- **OpenAI API Compatible:** Implements the standard OpenAI embedding response contract for seamless integration with existing AI tools.
-- **Batch Support:** Handles single strings or arrays of strings in a single request, preserving original input order.
-- **Store-Based Architecture:** Named stores bind a model and provider to a dedicated pgvector table. Create a store first, then reference its UUID in embedding requests.
-- **Dimension-Aware PGvector Tables:** Embedding dimensions are resolved from the provider at store creation time; the dedicated pgvector table is created immediately with the correct vector size.
-- **PostgreSQL + pgvector:** Persistent, scalable vector store with built-in SQL queryability and auditability.
-- **In-Memory Store Cache:** Registered stores are loaded into memory at startup and kept in sync on writes, eliminating database round-trips on the hot embedding path.
-- **HTTP Timeouts:** Configurable connection and request timeouts for external embedding providers.
-- **Provider Abstraction:** Extensible interface for multiple embedding provider implementations.
+## Features
 
----
+- **OpenAI-compatible response shape:** Returns `object`, `data`, and `usage`
+  fields in the style expected by common embeddings clients.
+- **Store-based caching:** Each store binds a user-facing name to a unique
+  provider model and dimensions pair, provider type, and dedicated pgvector table.
+- **Deterministic cache keys:** Text is normalized with `TextNormalizer` v1 and
+  hashed with xxHash64 before lookup.
+- **Batch support:** Accepts one string or an array of strings and preserves
+  the original input order in the response.
+- **Provider selection:** Supports `OLLAMA`, `OPENAI`, and `OPENROUTER`.
+- **Optional vector indexes:** Store creation can request a pgvector HNSW or
+  IVFFLAT index for similarity-search use cases.
+- **In-memory store cache:** Stores are loaded at startup and kept in memory for
+  the hot embedding path.
+- **Operational endpoints:** Actuator health, metrics, and Prometheus endpoints
+  can be exposed through the example configuration.
 
-## 🛠️ Requirements
+## Requirements
 
-- **Java 21+**
-- **Maven 3.9+**
-- **PostgreSQL 16+** with the [pgvector](https://github.com/pgvector/pgvector) extension installed.
-- **Embedding Provider:** An upstream API such as [Ollama](https://ollama.com/) or any OpenAI-compatible embedding service.
+- Java 21+
+- Maven 3.9+
+- PostgreSQL 16+ with the pgvector extension installed
+- An embedding provider compatible with the configured provider endpoint
 
----
+For local development, `docker-compose.yml` can start the service and a
+`pgvector/pgvector:pg16` database.
 
-## ⚙️ Configuration
+## Configuration
 
-The application is configured via environment variables or `application.yml`. Default values are provided for local development.
+The repository includes `src/main/resources/application.example.yml`. For local
+Maven runs, copy it to `src/main/resources/application.yml` or provide the same
+properties through environment variables. `application.yml` is ignored by Git.
 
-| Variable/Property                                          | Description                                          | Default                                       |
-| :--------------------------------------------------------- | :--------------------------------------------------- | :-------------------------------------------- |
-| `SERVER_PORT` / `server.port`                              | Port the application runs on                         | `8080`                                        |
-| `EMBEDDING_PROVIDER` / `app.embedding.provider.type`       | Provider selector (`OLLAMA`, `OPENAI`, `OPENROUTER`) | `OLLAMA`                                      |
-| `OLLAMA_URL` / `app.embedding.provider.ollama-url`         | Ollama embeddings endpoint                           | `http://localhost:11434/v1/embeddings`        |
-| `OPENAI_URL` / `app.embedding.provider.openai-url`         | OpenAI embeddings endpoint                           | `https://api.openai.com/v1/embeddings`        |
-| `OPENROUTER_URL` / `app.embedding.provider.openrouter-url` | OpenRouter embeddings endpoint                       | `https://openrouter.ai/api/v1/embeddings`     |
-| `DB_URL` / `spring.datasource.url`                         | PostgreSQL connection string                         | `jdbc:postgresql://localhost:5432/embeddings` |
-| `DB_USER` / `spring.datasource.username`                   | Database username                                    | `embeddings`                                  |
-| `DB_PASSWORD` / `spring.datasource.password`               | Database password                                    | `embeddings`                                  |
-| `app.embedding.provider.connect-timeout`                   | HTTP connection timeout (seconds)                    | `5`                                           |
-| `app.embedding.provider.request-timeout`                   | HTTP request timeout (seconds)                       | `30`                                          |
-| `app.embedding.max-batch-size`                             | Maximum strings per embedding request                | `100`                                         |
-| `app.embedding.max-input-length`                           | Maximum characters per input string                  | `8192`                                        |
+Docker Compose and `application.example.yml` use the environment variables shown
+below. Spring Boot relaxed binding also accepts equivalent property-style
+environment variables such as `APP_EMBEDDING_PROVIDER_TYPE`.
 
----
+| Property | Common env var | Default | Description |
+| :-- | :-- | :-- | :-- |
+| `server.port` | `SERVER_PORT` | `8989` in the example config and Docker Compose; `8080` if no config is provided | HTTP port |
+| `app.embedding.provider.type` | `EMBEDDING_PROVIDER` | `OLLAMA` | Provider selector: `OLLAMA`, `OPENAI`, or `OPENROUTER` |
+| `app.embedding.provider.ollama-url` | `OLLAMA_URL` | `http://localhost:11434/v1/embeddings` | Ollama-compatible embeddings endpoint |
+| `app.embedding.provider.openai-url` | `OPENAI_URL` | `https://api.openai.com/v1/embeddings` | OpenAI embeddings endpoint |
+| `app.embedding.provider.openrouter-url` | `OPENROUTER_URL` | `https://openrouter.ai/api/v1/embeddings` | OpenRouter embeddings endpoint |
+| `app.embedding.provider.api-key` | `EMBEDDING_PROVIDER_API_KEY` | unset in code | Bearer token sent when configured |
+| `app.embedding.provider.connect-timeout` | `OLLAMA_CONNECT_TIMEOUT` | `5s` | HTTP connection timeout |
+| `app.embedding.provider.request-timeout` | `OLLAMA_REQUEST_TIMEOUT` | `30s` | HTTP read/request timeout |
+| `app.embedding.max-batch-size` | `EMBEDDING_MAX_BATCH_SIZE` | `128` | Maximum input strings per embeddings request |
+| `app.embedding.max-input-length` | `EMBEDDING_MAX_INPUT_LENGTH` | `8192` | Maximum characters per input string |
+| `spring.datasource.url` | `DB_URL` | `jdbc:postgresql://localhost:5432/embeddings` | PostgreSQL JDBC URL |
+| `spring.datasource.username` | `DB_USER` | `embeddings` | Database user |
+| `spring.datasource.password` | `DB_PASSWORD` | `embeddings` | Database password |
+| `app.pgvector.schema-name` | `APP_PGVECTOR_SCHEMA_NAME` | `public` | Schema used for vector tables |
+| `app.pgvector.initialize-schema` | `APP_PGVECTOR_INITIALIZE_SCHEMA` | `true` | Whether the service creates per-store vector tables automatically |
+| `app.pgvector.schema-validation` | `APP_PGVECTOR_SCHEMA_VALIDATION` | `false` | Whether to verify that the configured schema exists |
+| `app.pgvector.index-type` | `APP_PGVECTOR_INDEX_TYPE` | `HNSW` in the example config; `NONE` in code defaults | Index type used when `createVectorIndex` is true |
+| `app.pgvector.distance-type` | `APP_PGVECTOR_DISTANCE_TYPE` | `COSINE_DISTANCE` | Operator class used for vector indexes |
 
-## 📊 Data Flow Architecture
+Provider model names are passed through to the upstream provider. A model may be
+registered with multiple dimensions, but each `model` + `dimensions` pair can
+belong to only one store. Store names are local service identifiers and may
+contain letters, numbers, spaces, hyphens, and underscores, up to 60 characters.
 
-The following diagram illustrates the lifecycle of an embedding request:
+For local Ollama usage, leave `EMBEDDING_PROVIDER_API_KEY` empty. When the value
+is present, the service sends it as a Bearer token to the selected provider.
 
-```mermaid
-flowchart TD
-    A["String or List, Model (OpenRouter Format)"] --> B[Text Normalization v1]
-    B --> C["Hash Generation (xxHash64)"]
-    C --> D{"Cache Lookup (PostgreSQL + pgvector)"}
+## Database Setup
 
-    D -->|HIT| E[Assemble Response]
-    D -->|MISS| F["Batch Fetch from Provider (Ollama / OpenAI / OpenRouter)"]
-
-    F --> G[Persist in PostgreSQL with pgvector]
-    G --> E
-    E --> H["JSON Response (OpenRouter Format)"]
-```
-
----
-
-## 🚀 Getting Started
-
-### 1. Database Setup
-
-Ensure the `pgvector` extension is enabled in PostgreSQL:
+The database must have the pgvector extension enabled before creating stores:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-The application uses PostgreSQL for persistent vector store with per-store tables created dynamically on first use. Tables are named `embeddings_<storeId>` and store vectors in `VECTOR` columns matching the model's embedding dimensions.
+The service creates one vector table per store when the store is created. Table
+names are generated from the store UUID, for example:
 
-**Connection Configuration** (via environment or `application.yml`):
+```text
+public.embeddings_33a4f614_da2b_452b_9f80_35c8df2177ce
+```
+
+If you use a schema other than `public`, create it yourself and configure
+`app.pgvector.schema-name`. The service validates identifier safety, but it does
+not create database schemas or the pgvector extension.
+
+## Running Locally
+
+### Docker Compose
+
+Start the app and local pgvector database:
 
 ```bash
-export DB_URL="jdbc:postgresql://localhost:5432/embeddings"
-export DB_USER="embeddings"
-export DB_PASSWORD="embeddings"
+docker compose --profile postgres up --build
 ```
 
-Or in `application.yml`:
+With the default Compose settings:
 
-```yaml
-spring:
-  datasource:
-    url: jdbc:postgresql://localhost:5432/embeddings
-    username: embeddings
-    password: embeddings
+- The service listens on `http://localhost:8989`.
+- PostgreSQL listens on `localhost:5432`.
+- Ollama is expected on the host at `http://host.docker.internal:11434/v1/embeddings`.
+
+Enable pgvector in the Compose database:
+
+```bash
+docker compose exec postgres psql -U embeddings -d embeddings -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
-### 2. Run the Application
+### Maven
 
-You can run the application using Maven:
+Create a local configuration file:
+
+```bash
+cp src/main/resources/application.example.yml src/main/resources/application.yml
+```
+
+Then run:
 
 ```bash
 mvn spring-boot:run
 ```
 
-Or build and run the JAR:
+Build a runnable JAR:
 
 ```bash
 mvn clean package
-java -jar target/embedding-cache-0.0.1-SNAPSHOT.jar
+java -jar target/lareferencia-embedding-service-0.0.1-SNAPSHOT.jar
 ```
 
----
+## API
 
-## 📖 API Documentation
+Swagger UI is available when the service is running:
 
-The API is fully documented using OpenAPI 3.0. When the application is running, you can access the interactive Swagger UI at:
-`http://localhost:8080/swagger-ui.html`
+```text
+http://localhost:8989/swagger-ui.html
+```
 
-### 1. Create a Store
+Use `8080` instead of `8989` if you run without `application.example.yml`,
+Docker Compose, or another `server.port` override.
 
-**Endpoint:** `POST /api/v1/stores`
+### Create a Store
 
-Creates a named store that binds a model to a dedicated pgvector table. Embedding dimensions are resolved from the provider at creation time.
+```http
+POST /api/v1/stores
+```
 
-**Request:**
+Creates a named store and its pgvector table. The service does not discover the
+dimensions from the provider during store creation, so set `dimensions` to the
+embedding size returned by the selected model.
+
+Request:
 
 ```json
 {
-  "name": "my-store",
-  "model": "qwen3-embedding:4b",
+  "name": "bge-m3-1024",
+  "model": "bge-m3",
+  "dimensions": 1024,
   "createVectorIndex": false
 }
 ```
 
-> `createVectorIndex` is optional and defaults to `false`. Set it to `true` to create a pgvector HNSW/IVFFLAT index on the embedding column — useful when you plan to perform similarity searches. For stores where embeddings are only retrieved by ID, omitting this parameter avoids the index overhead.
+Fields:
 
-**Response:**
+| Field | Required | Description |
+| :-- | :-- | :-- |
+| `name` | yes | Store name used later in embeddings requests. Allows letters, numbers, spaces, hyphens, and underscores. |
+| `model` | yes | Provider model name, for example `bge-m3`, `nomic-embed-text`, or `text-embedding-3-small`. |
+| `dimensions` | yes | Positive embedding vector size for the provider model. |
+| `createVectorIndex` | no | When `true`, creates a pgvector ANN index according to `app.pgvector.index-type`. |
+
+Response:
 
 ```json
 {
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "name": "my-store",
-  "model": "qwen3-embedding:4b",
-  "provider": "OLLAMA",
-  "embeddingDimensions": 2560,
-  "createdAt": "2026-05-12T10:00:00Z"
+  "id": "33a4f614-da2b-452b-9f80-35c8df2177ce",
+  "name": "bge-m3-1024",
+  "model": "bge-m3",
+  "provider": "ollama",
+  "embeddingDimensions": 1024,
+  "createdAt": "2026-06-30T22:29:57.915501Z"
 }
 ```
 
-### 2. List Stores
+Notes:
 
-**Endpoint:** `GET /api/v1/stores`
+- Store names are checked case-insensitively for duplicates at creation time.
+- The same provider model can be reused with different dimensions.
+- The same provider model and dimensions pair cannot be registered twice.
+- If `createVectorIndex` is `true` and the configured index type is `HNSW`,
+  the service skips the vector index for dimensions above 2000 because pgvector
+  does not support HNSW indexes above that limit.
 
-Returns all registered stores ordered by creation time.
+### List Stores
 
-### 3. Generate/Retrieve Embeddings
+```http
+GET /api/v1/stores
+```
 
-**Endpoint:** `POST /api/v1/embeddings`
+Returns registered stores from the in-memory cache.
 
-The `model` field must be the **UUID of an existing store** (returned by `POST /api/v1/stores`).
+Example response:
 
-**Request (Single):**
+```json
+[
+  {
+    "id": "33a4f614-da2b-452b-9f80-35c8df2177ce",
+    "name": "bge-m3-1024",
+    "model": "bge-m3",
+    "provider": "ollama",
+    "embeddingDimensions": 1024,
+    "createdAt": "2026-06-30T22:29:57.915501Z"
+  }
+]
+```
+
+### Generate or Reuse Embeddings
+
+```http
+POST /api/v1/embeddings
+```
+
+The request `model` field is the provider model name. The service uses
+`model` + `dimensions` to find the registered store and its dedicated cache table.
+
+Single input:
 
 ```json
 {
-  "model": "550e8400-e29b-41d4-a716-446655440000",
-  "input": "Este es un texto académico"
+  "model": "bge-m3",
+  "dimensions": 1024,
+  "input": "Este es un texto academico"
 }
 ```
 
-**Request (Batch):**
+Batch input:
 
 ```json
 {
-  "model": "550e8400-e29b-41d4-a716-446655440000",
+  "model": "bge-m3",
+  "dimensions": 1024,
   "input": ["Texto 1", "Texto 2"]
 }
 ```
 
-**Response:**
+Response:
 
 ```json
 {
-  "storeId": "550e8400-e29b-41d4-a716-446655440000",
-  "storeName": "my-store",
-  "model": "qwen3-embedding:4b",
-  "provider": "OLLAMA",
+  "storeId": "33a4f614-da2b-452b-9f80-35c8df2177ce",
+  "storeName": "bge-m3-1024",
+  "model": "bge-m3",
+  "provider": "ollama",
   "object": "list",
   "data": [
     {
       "object": "embedding",
       "index": 0,
-      "embedding": [0.0012, -0.045, "..."]
+      "embedding": [0.0012, -0.045]
     }
   ],
-  "usage": { "prompt_tokens": 0, "total_tokens": 0 }
+  "usage": {
+    "prompt_tokens": 0,
+    "total_tokens": 0
+  }
 }
 ```
 
----
+Input behavior:
 
-## 🧪 Testing
+- `input` must be a nonblank string or an array of nonblank strings.
+- `model` and `dimensions` must match one registered store.
+- Batch size is limited by `app.embedding.max-batch-size`.
+- Each input length is limited by `app.embedding.max-input-length`.
+- Text normalization trims, joins hyphenated line breaks, lowercases, replaces
+  line breaks with spaces, collapses whitespace, and applies Unicode NFC
+  normalization before hashing.
 
-Run the test suite using Maven:
+Usage behavior:
+
+- OpenAI and OpenRouter usage values are copied from the provider response when
+  present.
+- Ollama usage values are currently returned as zero.
+
+## Error Responses
+
+Errors are returned as `ApiErrorResponse` objects with timestamp, status, error,
+message, path, and details fields.
+
+Common statuses:
+
+- `400 Bad Request`: invalid JSON, validation error, blank input, oversized
+  batch, oversized input, or dimensions mismatch.
+- `404 Not Found`: no store was found for the requested model and dimensions.
+- `409 Conflict`: duplicate store name or duplicate model and dimensions pair.
+- `502 Bad Gateway`: upstream embedding provider failure.
+- `500 Internal Server Error`: unexpected application error.
+
+## Testing
+
+Run the test suite:
 
 ```bash
 mvn test
 ```
 
-Includes tests for:
+Current coverage includes:
 
-- **Text Normalizer:** Verifies formatting rules (trimming, Unicode normalization, etc.).
-- **Embedding Service:** Ensures cache-hit logic and order preservation for batch requests.
-- **Store Service:** Validates store creation, dimension probing, and table naming.
-- **PostgreSQL Integration:** Verifies pgvector store and retrieval operations.
+- DTO validation for store names.
+- Text normalization rules.
+- Store creation, duplicate detection, listing, and dimensions checks.
+- Embedding cache lookup, cache-miss generation, ordering, and inconsistent
+  provider dimensions.
+- Repository SQL generation for pgvector table and index creation.
+- Provider request authentication, response parsing, usage parsing, and error
+  wrapping.

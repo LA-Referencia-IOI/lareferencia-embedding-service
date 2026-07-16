@@ -3,8 +3,6 @@ package org.lareferencia.embedding.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -18,7 +16,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.lareferencia.embedding.dto.CreateStoreRequest;
 import org.lareferencia.embedding.dto.StoreResponse;
 import org.lareferencia.embedding.entity.StoreEntity;
-import org.lareferencia.embedding.exception.EmbeddingProviderException;
 import org.lareferencia.embedding.exception.InvalidRequestException;
 import org.lareferencia.embedding.exception.StoreAlreadyExistsException;
 import org.lareferencia.embedding.repository.EmbeddingRepository;
@@ -85,14 +82,65 @@ class StoreServiceTest {
   }
 
   @Test
-  void doesNotCreateStoreWhenProviderRejectsModel() {
+  void rejectsDuplicateModelAndDimension() {
+    when(storeRepository.findAll()).thenReturn(List.of(
+        StoreEntity.builder().id(STORE_ID).name("publications").model("nomic-embed-text")
+            .provider("openrouter").embeddingDimension(768).createdAt(Instant.now()).build()));
+    storeService.loadStoresIntoCache();
+
+    assertThrows(StoreAlreadyExistsException.class,
+        () -> storeService.createStore(new CreateStoreRequest("repositories", "nomic-embed-text", 768, false)));
+  }
+
+  @Test
+  void allowsSameModelWithDifferentDimensions() {
+    when(storeRepository.findAll()).thenReturn(List.of(
+        StoreEntity.builder().id(STORE_ID).name("publications-768").model("nomic-embed-text")
+            .provider("openrouter").embeddingDimension(768).createdAt(Instant.now()).build()));
+    storeService.loadStoresIntoCache();
     when(embeddingProviderService.provider()).thenReturn("openrouter");
+    when(storeRepository.save(any(StoreEntity.class))).thenReturn(StoreEntity.builder()
+        .id(STORE_ID_2)
+        .name("publications-1024")
+        .model("nomic-embed-text")
+        .provider("openrouter")
+        .embeddingDimension(1024)
+        .createdAt(Instant.now())
+        .build());
 
-    assertThrows(EmbeddingProviderException.class,
-        () -> storeService.createStore(new CreateStoreRequest("publications", "missing-model", 768, false)));
+    StoreResponse response = storeService
+        .createStore(new CreateStoreRequest("publications-1024", "nomic-embed-text", 1024, false));
 
-    verify(storeRepository, never()).save(any(StoreEntity.class));
-    verify(embeddingRepository, never()).ensureStoreTableExists(any(UUID.class), any(Integer.class), anyBoolean());
+    assertEquals(STORE_ID_2, response.id());
+    assertEquals("nomic-embed-text", response.model());
+    assertEquals(1024, response.embeddingDimensions());
+  }
+
+  @Test
+  void findsRequiredStoreByModelAndDimension() {
+    when(storeRepository.findAll()).thenReturn(List.of(
+        StoreEntity.builder().id(STORE_ID).name("publications-768").model("nomic-embed-text")
+            .provider("openrouter").embeddingDimension(768).createdAt(Instant.now()).build(),
+        StoreEntity.builder().id(STORE_ID_2).name("publications-1024").model("nomic-embed-text")
+            .provider("openrouter").embeddingDimension(1024).createdAt(Instant.now()).build()));
+    storeService.loadStoresIntoCache();
+
+    StoreEntity store = storeService.getRequiredStore("nomic-embed-text", 1024);
+
+    assertEquals(STORE_ID_2, store.getId());
+    assertEquals("publications-1024", store.getName());
+  }
+
+  @Test
+  void rejectsAmbiguousStoreLookupByModelAndDimension() {
+    when(storeRepository.findAll()).thenReturn(List.of(
+        StoreEntity.builder().id(STORE_ID).name("publications-a").model("nomic-embed-text")
+            .provider("openrouter").embeddingDimension(768).createdAt(Instant.now()).build(),
+        StoreEntity.builder().id(STORE_ID_2).name("publications-b").model("nomic-embed-text")
+            .provider("openrouter").embeddingDimension(768).createdAt(Instant.now()).build()));
+    storeService.loadStoresIntoCache();
+
+    assertThrows(InvalidRequestException.class, () -> storeService.getRequiredStore("nomic-embed-text", 768));
   }
 
   @Test

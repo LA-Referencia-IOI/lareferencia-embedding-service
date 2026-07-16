@@ -41,8 +41,8 @@ public class EmbeddingService {
     private final PerKeyLockManager perKeyLockManager;
 
     public GenerateEmbeddingsResponse generateEmbeddings(GenerateEmbeddingsRequest request) {
-        StoreEntity store = storeService.getRequiredStore(request.model());
         List<String> inputs = validateAndExtractInputs(request);
+        StoreEntity store = storeService.getRequiredStore(request.model().trim(), request.dimensions());
         Counter cacheHitCounter = cacheHitCounter(store);
         Counter cacheMissCounter = cacheMissCounter(store);
         Counter generationCounter = generationCounter(store);
@@ -231,8 +231,11 @@ public class EmbeddingService {
     }
 
     private List<String> validateAndExtractInputs(GenerateEmbeddingsRequest request) {
-        if (request.model() == null) {
-            throw new InvalidRequestException("model (storeId) must be provided");
+        if (request.model() == null || request.model().isBlank()) {
+            throw new InvalidRequestException("model must be provided");
+        }
+        if (request.dimensions() <= 0) {
+            throw new InvalidRequestException("dimensions must be a positive number");
         }
 
         List<String> inputs = request.inputs();

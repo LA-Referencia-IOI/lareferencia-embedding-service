@@ -19,7 +19,10 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "stores", uniqueConstraints = @UniqueConstraint(name = "uk_store_name", columnNames = "name"))
+@Table(name = "stores", uniqueConstraints = {
+    @UniqueConstraint(name = "uk_store_name", columnNames = "name"),
+    @UniqueConstraint(name = "uk_store_model_dimension", columnNames = { "model", "embedding_dimension" })
+})
 @Getter
 @Setter
 @Builder

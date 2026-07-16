@@ -19,12 +19,12 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/v1/embeddings")
 @RequiredArgsConstructor
-@Tag(name = "Embeddings", description = "Generate embeddings with store-aware persistent caching")
+@Tag(name = "Embeddings", description = "Generate embeddings with model and dimensions aware persistent caching")
 public class EmbeddingController {
 
     private final EmbeddingService embeddingService;
 
-    @Operation(summary = "Generate embeddings", description = "Generates embeddings for a single text or a batch of texts using the model configured for the selected store. Cached vectors are returned when available.")
+    @Operation(summary = "Generate embeddings", description = "Generates embeddings for a single text or a batch of texts using the store registered for the requested model and dimensions. Cached vectors are returned when available.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Embeddings generated or reused successfully"),
             @ApiResponse(responseCode = "400", description = "Invalid request payload"),

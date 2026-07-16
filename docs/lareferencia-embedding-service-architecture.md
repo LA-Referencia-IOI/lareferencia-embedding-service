@@ -62,11 +62,11 @@ To ensure deterministic hashing, the following rules are applied in order:
 
 ## 5. API Strategy
 
-The application follows a versioned API approach (`/api/v1`) to ensure long-term stability. Embedding generation is store-scoped: callers first create a named store's UUID as the `model` field.
+The application follows a versioned API approach (`/api/v1`) to ensure long-term stability. Embedding generation is store-scoped internally: callers create a named store for a provider model and dimensions, then request embeddings with that same model and dimensions.
 
-- **`POST /api/v1/stores`**: Create a named store binding a model string to a dedicated pgvector table. The embedding provider is contacted at creation time to resolve model dimensions. Accepts an optional `createVectorIndex` boolean (default `false`) — set to `true` to create a pgvector index for similarity searches.
+- **`POST /api/v1/stores`**: Create a named store binding a model string and embedding dimensions to a dedicated pgvector table. A model may be registered with different dimensions, but the same model and dimensions pair cannot be registered twice. Accepts an optional `createVectorIndex` boolean (default `false`) — set to `true` to create a pgvector index for similarity searches.
 - **`GET /api/v1/stores`**: List all registered stores.
-- **`POST /api/v1/embeddings`**: Main entry point for embedding generation/caching. The `model` field must be the UUID of an existing store. The request body follows the OpenAI embeddings API format — a single string or an array of strings.
+- **`POST /api/v1/embeddings`**: Main entry point for embedding generation/caching. The `model` and `dimensions` fields select the registered store. The request body follows the OpenAI embeddings API format — a single string or an array of strings.
 
 ---
 
