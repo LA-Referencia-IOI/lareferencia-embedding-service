@@ -23,8 +23,8 @@ cache misses.
   IVFFLAT index for similarity-search use cases.
 - **In-memory store cache:** Stores are loaded at startup and kept in memory for
   the hot embedding path.
-- **Operational endpoints:** Actuator health, metrics, and Prometheus endpoints
-  can be exposed through the example configuration.
+- **Operational endpoints:** Actuator health, metrics, Prometheus, and
+  application status endpoints expose service and database usage.
 
 ## Requirements
 
@@ -223,6 +223,92 @@ Example response:
 ]
 ```
 
+### Get Status
+
+```http
+GET /api/v1/status
+```
+
+Returns host resource usage plus PostgreSQL store and embedding-table usage.
+Byte values are returned both as raw numbers and formatted display strings.
+
+Example response:
+
+```json
+{
+  "timestamp": "2026-08-07T16:14:58.113Z",
+  "system": {
+    "cpu": {
+      "availableProcessors": 8,
+      "usagePercent": 12.5,
+      "freePercent": 87.5,
+      "systemLoadAverage": 1.82
+    },
+    "ram": {
+      "totalBytes": 17179869184,
+      "usedBytes": 8589934592,
+      "freeBytes": 8589934592,
+      "usagePercent": 50.0,
+      "freePercent": 50.0,
+      "total": "16.00 GiB",
+      "used": "8.00 GiB",
+      "free": "8.00 GiB"
+    },
+    "disk": {
+      "totalBytes": 494384795648,
+      "usedBytes": 247192397824,
+      "freeBytes": 247192397824,
+      "usableBytes": 247192397824,
+      "usagePercent": 50.0,
+      "freePercent": 50.0,
+      "total": "460.42 GiB",
+      "used": "230.21 GiB",
+      "free": "230.21 GiB",
+      "usable": "230.21 GiB",
+      "volumes": [
+        {
+          "path": "/",
+          "totalBytes": 494384795648,
+          "usedBytes": 247192397824,
+          "freeBytes": 247192397824,
+          "usableBytes": 247192397824,
+          "usagePercent": 50.0,
+          "freePercent": 50.0,
+          "total": "460.42 GiB",
+          "used": "230.21 GiB",
+          "free": "230.21 GiB",
+          "usable": "230.21 GiB"
+        }
+      ]
+    }
+  },
+  "database": {
+    "name": "embeddings",
+    "sizeBytes": 104857600,
+    "size": "100.00 MiB",
+    "storeCount": 2,
+    "embeddingTableCount": 2,
+    "embeddingTables": [
+      {
+        "schema": "public",
+        "table": "embeddings_33a4f614_da2b_452b_9f80_35c8df2177ce",
+        "storeId": "33a4f614-da2b-452b-9f80-35c8df2177ce",
+        "storeName": "bge-m3-1024",
+        "model": "bge-m3",
+        "embeddingDimensions": 1024,
+        "tableSizeBytes": 6291456,
+        "indexesSizeBytes": 1048576,
+        "totalSizeBytes": 7340032,
+        "estimatedRows": 12000,
+        "tableSize": "6.00 MiB",
+        "indexesSize": "1.00 MiB",
+        "totalSize": "7.00 MiB"
+      }
+    ]
+  }
+}
+```
+
 ### Generate or Reuse Embeddings
 
 ```http
@@ -321,5 +407,6 @@ Current coverage includes:
 - Embedding cache lookup, cache-miss generation, ordering, and inconsistent
   provider dimensions.
 - Repository SQL generation for pgvector table and index creation.
+- Status response composition for database and embedding table metrics.
 - Provider request authentication, response parsing, usage parsing, and error
   wrapping.
