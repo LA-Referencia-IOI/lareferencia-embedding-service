@@ -6,6 +6,9 @@ services:
     container_name: lareferencia-embedding-service
     environment:
       SERVER_PORT: ${SERVER_PORT:-8989}
+      DVP_ENABLED: ${DVP_ENABLED:-false}
+      DVP_WORKERS_ENABLED: ${DVP_WORKERS_ENABLED:-false}
+      DVP_ROLE: ${DVP_ROLE:-API}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-OLLAMA}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434/v1/embeddings}
       OPENAI_URL: ${OPENAI_URL:-https://api.openai.com/v1/embeddings}
@@ -15,9 +18,9 @@ services:
       OLLAMA_REQUEST_TIMEOUT: ${OLLAMA_REQUEST_TIMEOUT:-30s}
       EMBEDDING_MAX_BATCH_SIZE: ${EMBEDDING_MAX_BATCH_SIZE:-128}
       EMBEDDING_MAX_INPUT_LENGTH: ${EMBEDDING_MAX_INPUT_LENGTH:-8192}
-      DB_URL: ${DB_URL:-jdbc:postgresql://postgres:5432/embeddings}
-      DB_USER: ${DB_USER:-embeddings}
-      DB_PASSWORD: ${DB_PASSWORD:-embeddings}
+      SPRING_DATASOURCE_URL: ${DB_URL:-jdbc:postgresql://postgres:5432/embeddings}
+      SPRING_DATASOURCE_USERNAME: ${DB_USER:-embeddings}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:-embeddings}
     ports:
       - "${SERVER_PORT:-8989}:${SERVER_PORT:-8989}"
     extra_hosts:
@@ -25,7 +28,7 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:0.8.0-pg16
     container_name: embedding-postgres
     environment:
       POSTGRES_USER: ${DB_USER:-embeddings}

@@ -1,0 +1,16 @@
+# Disposable integration server, isolated from application databases and volumes.
+services:
+  pgvector-test:
+    image: pgvector/pgvector:0.8.0-pg16
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_DB: dvp_test
+    ports:
+      - "127.0.0.1:${DVP_TEST_DB_PORT:-55439}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "dvp_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

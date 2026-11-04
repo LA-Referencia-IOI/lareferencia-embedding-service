@@ -21,8 +21,10 @@ cache misses.
 - **Provider selection:** Supports `OLLAMA`, `OPENAI`, and `OPENROUTER`.
 - **Optional vector indexes:** Store creation can request a pgvector HNSW or
   IVFFLAT index for similarity-search use cases.
-- **In-memory store cache:** Stores are loaded at startup and kept in memory for
-  the hot embedding path.
+- **Consistent store lookup:** Indexed database lookups make committed stores
+  visible across replicas; dynamic-table readiness is cached only after commit.
+- **Additive v2 foundation:** Optional Collections API with transactional
+  idempotency, strict JSON, cursor pagination and isolated resource pools.
 - **Operational endpoints:** Actuator health, metrics, Prometheus, and
   application status endpoints expose service and database usage.
 
@@ -34,37 +36,40 @@ cache misses.
 - An embedding provider compatible with the configured provider endpoint
 
 For local development, `docker-compose.yml` can start the service and a
-`pgvector/pgvector:pg16` database.
+`pgvector/pgvector:0.8.0-pg16` database.
 
 ## Configuration
 
-The repository includes `src/main/resources/application.example.yml`. For local
-Maven runs, copy it to `src/main/resources/application.yml` or provide the same
-properties through environment variables. `application.yml` is ignored by Git.
+The tracked `src/main/resources/application.properties` loads on a clean checkout.
+Use environment variables for local or container runs. The optional
+`application.example.yml` documents equivalent overrides; ignored
+`src/main/resources/application.yml` is excluded from clean JAR and Docker builds.
+To load a private configuration explicitly, use an external file with
+`--spring.config.additional-location=file:/path/to/application.yml`.
 
-Docker Compose and `application.example.yml` use the environment variables shown
+Docker Compose and the active configuration use the environment variables shown
 below. Spring Boot relaxed binding also accepts equivalent property-style
 environment variables such as `APP_EMBEDDING_PROVIDER_TYPE`.
 
 | Property | Common env var | Default | Description |
 | :-- | :-- | :-- | :-- |
-| `server.port` | `SERVER_PORT` | `8989` in the example config and Docker Compose; `8080` if no config is provided | HTTP port |
+| `server.port` | `SERVER_PORT` | `8989` | HTTP port |
 | `app.embedding.provider.type` | `EMBEDDING_PROVIDER` | `OLLAMA` | Provider selector: `OLLAMA`, `OPENAI`, or `OPENROUTER` |
 | `app.embedding.provider.ollama-url` | `OLLAMA_URL` | `http://localhost:11434/v1/embeddings` | Ollama-compatible embeddings endpoint |
 | `app.embedding.provider.openai-url` | `OPENAI_URL` | `https://api.openai.com/v1/embeddings` | OpenAI embeddings endpoint |
 | `app.embedding.provider.openrouter-url` | `OPENROUTER_URL` | `https://openrouter.ai/api/v1/embeddings` | OpenRouter embeddings endpoint |
-| `app.embedding.provider.api-key` | `EMBEDDING_PROVIDER_API_KEY` | unset in code | Bearer token sent when configured |
+| `app.embedding.provider.api-key` | `EMBEDDING_PROVIDER_API_KEY` | empty | Bearer token sent when configured |
 | `app.embedding.provider.connect-timeout` | `OLLAMA_CONNECT_TIMEOUT` | `5s` | HTTP connection timeout |
 | `app.embedding.provider.request-timeout` | `OLLAMA_REQUEST_TIMEOUT` | `30s` | HTTP read/request timeout |
 | `app.embedding.max-batch-size` | `EMBEDDING_MAX_BATCH_SIZE` | `128` | Maximum input strings per embeddings request |
 | `app.embedding.max-input-length` | `EMBEDDING_MAX_INPUT_LENGTH` | `8192` | Maximum characters per input string |
 | `spring.datasource.url` | `DB_URL` | `jdbc:postgresql://localhost:5432/embeddings` | PostgreSQL JDBC URL |
 | `spring.datasource.username` | `DB_USER` | `embeddings` | Database user |
-| `spring.datasource.password` | `DB_PASSWORD` | `embeddings` | Database password |
+| `spring.datasource.password` | `DB_PASSWORD` | empty in application; `embeddings` in local Compose | Database password |
 | `app.pgvector.schema-name` | `APP_PGVECTOR_SCHEMA_NAME` | `public` | Schema used for vector tables |
 | `app.pgvector.initialize-schema` | `APP_PGVECTOR_INITIALIZE_SCHEMA` | `true` | Whether the service creates per-store vector tables automatically |
 | `app.pgvector.schema-validation` | `APP_PGVECTOR_SCHEMA_VALIDATION` | `false` | Whether to verify that the configured schema exists |
-| `app.pgvector.index-type` | `APP_PGVECTOR_INDEX_TYPE` | `HNSW` in the example config; `NONE` in code defaults | Index type used when `createVectorIndex` is true |
+| `app.pgvector.index-type` | `APP_PGVECTOR_INDEX_TYPE` | `HNSW` in active configuration; `NONE` in Java-only defaults | Index type used when `createVectorIndex` is true |
 | `app.pgvector.distance-type` | `APP_PGVECTOR_DISTANCE_TYPE` | `COSINE_DISTANCE` | Operator class used for vector indexes |
 
 Provider model names are passed through to the upstream provider. A model may be
@@ -118,13 +123,8 @@ docker compose exec postgres psql -U embeddings -d embeddings -c "CREATE EXTENSI
 
 ### Maven
 
-Create a local configuration file:
-
-```bash
-cp src/main/resources/application.example.yml src/main/resources/application.yml
-```
-
-Then run:
+Set database connection variables (`DB_URL`, `DB_USER`, `DB_PASSWORD`) as needed,
+enable the vector extension administratively, then run:
 
 ```bash
 mvn spring-boot:run
@@ -145,8 +145,7 @@ Swagger UI is available when the service is running:
 http://localhost:8989/swagger-ui.html
 ```
 
-Use `8080` instead of `8989` if you run without `application.example.yml`,
-Docker Compose, or another `server.port` override.
+The active default port is `8989`; override it with `SERVER_PORT` if needed.
 
 ### Create a Store
 
@@ -206,7 +205,7 @@ Notes:
 GET /api/v1/stores
 ```
 
-Returns registered stores from the in-memory cache.
+Returns committed stores from the database, ordered by UUID.
 
 Example response:
 
@@ -387,7 +386,7 @@ Common statuses:
 - `400 Bad Request`: invalid JSON, validation error, blank input, oversized
   batch, oversized input, or dimensions mismatch.
 - `404 Not Found`: no store was found for the requested model and dimensions.
-- `409 Conflict`: duplicate store name or duplicate model and dimensions pair.
+- `409 Conflict`: duplicate store name/model and dimensions, or a store whose persisted provider differs from the configured provider.
 - `502 Bad Gateway`: upstream embedding provider failure.
 - `500 Internal Server Error`: unexpected application error.
 
@@ -410,3 +409,33 @@ Current coverage includes:
 - Status response composition for database and embedding table metrics.
 - Provider request authentication, response parsing, usage parsing, and error
   wrapping.
+
+## v2 Collections and upgrades
+
+Set `DVP_ENABLED=true` to expose `/api/v2/collections`. V2 is disabled by default;
+this release implements collection create/list/get only. Documents, profiles,
+indexations, jobs, imports and search are planned in later phases.
+
+Creating a collection requires an `Idempotency-Key` header:
+
+```bash
+curl -X POST http://localhost:8989/api/v2/collections \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: research-create-001' \
+  -d '{"slug":"research","name":"Research"}'
+```
+
+Use a new key for a different create request. Reusing the same key with the same
+body replays the original response; reusing it with different content returns 409.
+
+See [Phases 1–3 operations](docs/phases-1-3-operations.md) for the Collections
+contract, limits/pools, explicit legacy Flyway baseline, non-destructive rollback,
+and the opt-in real PostgreSQL integration-test commands. Existing installations
+must follow that baseline procedure before starting this version: automatic
+baselining is disabled, and Hibernate now validates migration-owned tables.
+
+The v1 store identity and xxHash/text-normalization behavior are preserved.
+Case-insensitive store uniqueness and model lookup use PostgreSQL `lower(...)`
+consistently. A store from a different configured provider returns 409 before
+cache reads or inference; do not repoint an existing store at another vector
+space. No historical cache is converted into documents or automatically reindexed.

@@ -16,7 +16,7 @@ public class OpenApiConfig {
                 return new OpenAPI()
                                 .info(new Info()
                                                 .title("LA Referencia Multi-Store Embeddings API")
-                                                .description("REST API for managing embedding stores and generating persistent cached embeddings with Spring AI, Ollama, PostgreSQL, and pgvector.")
+                                                .description("REST API for v1 embedding stores/caching and optional v2 document-vector platform resources with HTTP providers, PostgreSQL and pgvector.")
                                                 .version("1.0.0")
                                                 .contact(new Contact()
                                                                 .name("LA Referencia")

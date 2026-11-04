@@ -2,6 +2,14 @@
 
 Fecha de revisión: 2 de noviembre de 2026.
 
+Actualización de implementación (4 de noviembre de 2026): las correcciones 1–7
+se implementaron en la fase 1, con regresiones unitarias y pruebas sobre
+PostgreSQL/pgvector. La revisión original que sigue se conserva como historial;
+sus etiquetas «pendiente» y el fallo inicial de locale describen aquella revisión.
+El estado y las aprobaciones actuales están en [el plan](docs/IMPLEMENTATION_PLAN.md)
+y la migración/rollback en [operaciones](docs/phases-1-3-operations.md).
+El código v1 ahora está bajo `org.lareferencia.embedding.v1`.
+
 Este documento recoge los problemas identificados en la revisión del código y las
 correcciones propuestas. No implica que los cambios estén implementados. Salvo el
 fallo de pruebas indicado al final, los hallazgos proceden del análisis estático;
