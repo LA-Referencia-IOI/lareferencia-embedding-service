@@ -19,6 +19,7 @@ public class V2JsonConfig implements WebMvcConfigurer {
     var strict=mapper.copy().setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
         .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+        .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
         .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     strict.coercionConfigFor(com.fasterxml.jackson.databind.type.LogicalType.Textual)
         .setCoercion(com.fasterxml.jackson.databind.cfg.CoercionInputShape.Integer, com.fasterxml.jackson.databind.cfg.CoercionAction.Fail)

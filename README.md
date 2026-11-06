@@ -413,8 +413,10 @@ Current coverage includes:
 ## v2 Collections and upgrades
 
 Set `DVP_ENABLED=true` to expose `/api/v2/collections`. V2 is disabled by default;
-this release implements collection create/list/get only. Documents, profiles,
-indexations, jobs, imports and search are planned in later phases.
+this release implements collection create/list/get and document/source-text
+lifecycle operations. Profiles, indexations, jobs, imports and search are planned
+in later phases. See [Phase 4 documents](docs/phase-4-documents.md) for usage,
+limits, representation invalidation and rollback.
 
 Creating a collection requires an `Idempotency-Key` header:
 

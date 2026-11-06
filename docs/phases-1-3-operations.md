@@ -1,8 +1,9 @@
 # Phases 1–3: operation, compatibility and verification
 
 This release preserves the v1 embedding API, introduces an additive `dvp` registry
-and implements v2 Collections. The document/text/profile/indexation/job/import/search
-APIs and workers belong to later phases and are not exposed here. No UI is included.
+and implements v2 Collections. Phase 4 also exposes the [document and source-text
+API](phase-4-documents.md); profile/indexation/job/import/search APIs and workers
+belong to later phases. No UI is included.
 The existing deployment access boundary applies; a collection is not a security tenant.
 
 ## Java package boundaries
@@ -147,8 +148,8 @@ return bodies, SQL, provider keys or private exception text. A request above the
 limit is 413, including when its declared size is absent; database/pool unavailability
 is 503. V1 retains its separate response/error shapes. Swagger/OpenAPI at `/v3/api-docs`
 and `/swagger-ui.html` documents the enabled routes; disabled v2 has no Collections
-controller. Document `If-Match` helpers exist for later APIs but no document endpoint
-is exposed yet.
+controller. Document endpoints use the same `If-Match` helpers; see the
+[Phase 4 document contract](phase-4-documents.md).
 
 ## Resource ownership and initial limits
 

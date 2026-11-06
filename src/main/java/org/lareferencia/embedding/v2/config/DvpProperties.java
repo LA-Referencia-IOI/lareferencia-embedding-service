@@ -21,6 +21,7 @@ public class DvpProperties {
   @Min(250) private long connectionTimeoutMs = 1000;
   @Min(1) private int inferenceConcurrency = 4;
   @Min(1) private long maxRequestBytes = 16L * 1024 * 1024;
+  @Min(1) private long maxDocumentBytes = 16L * 1024 * 1024;
   @Min(1) private int maxTexts = 1000;
   @Min(1) private int maxTextCodePoints = 2_000_000;
   @Min(1) private int maxMetadataBytes = 256 * 1024;

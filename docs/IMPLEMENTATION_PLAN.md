@@ -1,6 +1,6 @@
 # Document and Vector Platform — Implementation Plan
 
-**Status:** Phases 1–3 implemented and verified; post-implementation user approval pending. Phases 4–14 have not started.
+**Status:** Phases 1–4 implemented; post-implementation user approval pending. Phases 5–14 have not started. See the phase records for verification evidence.
 
 **Baseline examined:** `main`, commit `52aadb3642a787fefdc69d2d7676122021feeefb`, 2026-11-04. The working tree already contained a change to `.gitignore`; it is outside this plan.
 
@@ -8,7 +8,7 @@
 
 **Scope:** This repository only. No graphical interface is specified or present. Each feature phase includes its API, persistence, operational integration, OpenAPI, tests and documentation. No frontend work is assumed. Authentication remains at the existing deployment boundary; collections are not security tenants.
 
-**Execution authorization:** The user's 2026-11-04 request authorized sequential implementation of phases 1, 2 and 3; a subsequent request explicitly authorized moving v1 code into `org.lareferencia.embedding.v1`. Those requests authorize the work recorded below, but are not recorded as approval of the completed results. Phase completion/approval gates remain unchecked pending review; do not begin phase 4 without explicit approval of the preceding baseline.
+**Execution authorization:** The user's 2026-11-04 request authorized sequential implementation of phases 1, 2 and 3; a subsequent request explicitly authorized moving v1 code into `org.lareferencia.embedding.v1`. Those requests authorize the work recorded below, but are not recorded as approval of the completed results. Phase completion/approval gates remain unchecked pending review. On 2026-11-05 the user explicitly requested phase 4; that request authorized its implementation but does not record approval of earlier results.
 
 ## How to use this plan across sessions
 
@@ -125,14 +125,14 @@ Required real-extension fixtures cover maximum finite half values (including 655
 
 Entity dependencies: `collection → document → source_text → vector_unit → vector row`; `profile + collection → indexation → dedicated vector table`; `job → item` and optional durable import file; preparation and generation require indexation, document and job runtime; import additionally uses document upsert, vector validation and checkpointing; retrieval requires current units/vectors; exact and approximate search depend on retrieval invariants and a populated index. `idempotency`, errors, cursors, config, migrations and instrumentation are shared prerequisites.
 
-Phases 1–3 are **implemented and verified, awaiting post-implementation approval**; phases 4–14 are **not started**. The execution authorization above covered phases 1–3. Check a phase completion box only after its common gate and explicit approval; no approval is inferred from passing tests.
+Phases 1–3 are **implemented and verified, awaiting post-implementation approval**; phase 4 is **implemented and verified, awaiting approval**; phases 5–14 are **not started**. The execution authorization above covers phases 1–4. Check a phase completion box only after its common gate and explicit approval; no approval is inferred from passing tests.
 
 | Complete | Phase | Focus / deliverable | Technical prerequisites | Specification acceptance | Status |
 | --- | --- | --- | --- | --- | --- |
 | [ ] | 1 | v1 compatibility, migration baseline, DB test harness and reproducible runtime | Existing service | T01, T14, v1 portion T17 | Implemented; verified; approval pending |
 | [ ] | 2 | v2 schema, shared contracts and resource isolation | 1 | T17, shared T18, T21 | Implemented; verified; approval pending |
 | [ ] | 3 | Collections | 2 | T02, T18 | Implemented; verified; approval pending |
-| [ ] | 4 | Documents and source texts | 3 | T02–T04, T18 | Not started |
+| [ ] | 4 | Documents and source texts | 3 | T02–T04, T18 | Implemented; verified; approval pending |
 | [ ] | 5 | Embedding profiles and provider registry | 2 | T14, T19, T20 | Not started |
 | [ ] | 6 | Persistent jobs and worker runtime | 2–4 | T15–T16, T18 | Not started |
 | [ ] | 7 | Index configurations and maintenance | 3, 5, 6 | T17, T20 | Not started |
@@ -191,12 +191,12 @@ The specification's six broad phases are subdivided here to keep each entity/fea
 
 **Depends on:** 3. **Components:** document/text services, transactional repositories, controllers/DTOs, migrations, OpenAPI. **Deliverable:** full §6.2 document lifecycle.
 
-- [ ] Implement PATCH/PUT upsert and GET by external ID query, GET by UUID/list, and delete document/text. Preserve exact external IDs/text keys including Unicode, `/` and `:`; enforce collection ownership, character/byte/body/metadata limits and duplicate-key validation.
-- [ ] Implement PATCH metadata replacement only when present and partial keyed texts; PUT requires both fields and removes omitted texts. Persist each document and its texts atomically, lock with `INSERT ... ON CONFLICT` followed by row locking, implement ETag/If-Match and optional idempotency. Increment document/text revisions only for actual changes; metadata-only updates retain vectors.
-- [ ] Implement text-change/deletion invalidation using unit/vector FKs and consistent lock order. Unit/vector tables may be populated by integration fixtures before their APIs exist; test cross-indexation cascades without introducing generation early. List documents by sequence keyset, excluding bodies and metadata unless requested.
-- [ ] **Tests:** unit PATCH/PUT/limits/revision rules; real DB concurrent creation/update/delete, If-Match, no-op and cascades using representative units/vector fixtures; HTTP cases for same external ID across collections, special IDs, 404/412/422 and cursor paging (T02–T04, T18).
-- [ ] **Verify / accept:** two collections retain independent same-ID documents; PATCH preserves omitted texts, PUT removes them, identical request leaves revision/time unchanged, and delete/change removes only affected representations while metadata-only update preserves them. Risks: byte limits and concurrent cascades across many dynamic tables require measurement.
-- [ ] Common completion gate and explicit phase approval complete. **Record:** pending.
+- [x] Implement PATCH/PUT upsert and GET by external ID query, GET by UUID/list, and delete document/text. Preserve exact external IDs/text keys including Unicode, `/` and `:`; enforce collection ownership, character/byte/body/metadata limits and duplicate-key validation.
+- [x] Implement PATCH metadata replacement only when present and partial keyed texts; PUT requires both fields and removes omitted texts. Persist each document and its texts atomically, lock with `INSERT ... ON CONFLICT` followed by row locking, implement ETag/If-Match and optional idempotency. Increment document/text revisions only for actual changes; metadata-only updates retain vectors.
+- [x] Implement text-change/deletion invalidation using unit/vector FKs and consistent lock order. Unit/vector tables may be populated by integration fixtures before their APIs exist; test cross-indexation cascades without introducing generation early. List documents by sequence keyset, excluding bodies and metadata unless requested.
+- [x] **Tests:** unit PATCH/PUT/limits/revision rules; real DB concurrent creation/update/delete, If-Match, no-op and cascades using representative units/vector fixtures; HTTP cases for same external ID across collections, special IDs, 404/412/422 and cursor paging (T02–T04, T18).
+- [x] **Verify / accept:** two collections retain independent same-ID documents; PATCH preserves omitted texts, PUT removes them, identical request leaves revision/time unchanged, and delete/change removes only affected representations while metadata-only update preserves them. Risks: byte limits and concurrent cascades across many dynamic tables require measurement.
+- [ ] Common completion gate and explicit phase approval complete. **Record:** implemented and verified; user approval pending (see phase 4 record).
 
 ### Phase 5 — Immutable embedding profiles and provider registry
 
@@ -415,7 +415,15 @@ Additional review checks extend this matrix without renumbering the specificatio
 - Collections integration tests cover concurrent duplicate slug and same-key writes, changed-content conflicts, missing resources, strict fields/scalar types, Unicode code-point limits, byte limits, pagination, v1 error-shape preservation and generated OpenAPI schemas. Initial feature baseline passed **55 tests**; added rollback, v1 HTTP, filter and deterministic lock checks brought the suite to **60 tests**.
 - Live JAR check on the earlier smoke database applied V3 while retaining its v1 store: Unicode collection create 201, get/list 200, same-key body/Location replay 201 and changed-content 409. Restarting the earlier phase-1 application image against V3 history still served health/v1 stores successfully; SQL confirmed one legacy store, one v2 collection and three successful migration entries remained.
 - User-requested version folders were applied to production code, test packages and configuration metadata. Root infrastructure is shared; v1 implementation no longer imports v2 types. Full verification after that move and scoped error-handler separation is recorded below.
-- **Approval:** pending. No document/profile/job/import/search API is exposed. No UI, external-provider provenance verification or capacity SLA is claimed.
+- **Approval:** pending. At completion of phase 3 no document/profile/job/import/search API was exposed; phase 4 subsequently added documents. No UI, external-provider provenance verification or capacity SLA is claimed.
+
+### Phase 4 record — 2026-11-05
+
+- **Authorization and baseline:** the user explicitly requested phase 4. Starting commit `e670e7f`; earlier phase approval remains pending and is not inferred. Existing changes to the example configuration were present before this phase and were preserved.
+- **Implementation:** v2 document and source-text endpoints use collection-scoped JDBC repositories, exact Unicode identifiers, transactional upsert/delete, revisions and conditional writes, optional idempotency, keyset pagination, and source/vector cascade invalidation. Document mutations serialize on the document row using READ COMMITTED; read transactions use the existing repeatable-read pool. JSON metadata preserves decimal precision. Responses and database failures redact source bodies from debug output.
+- **Decisions and operations:** no migration was necessary; existing V3 tables and foreign keys are used. A separate `app.dvp.max-document-bytes` limit (16 MiB default) applies to the combined compact UTF-8 metadata/text snapshot after PATCH merges. Source changes intentionally invalidate associated representations; metadata-only changes retain them. No provider/inference request is made. See [document operations and rollback](phase-4-documents.md).
+- **Verification:** focused tests cover validation, special IDs, exact hash and numeric metadata, PATCH/PUT/no-op semantics, revision/precondition behavior, replay, limits, listing, debug redaction, cross-indexation vectors, rollback and concurrent writes/deletes. A sandboxed test attempt could not connect to localhost (`Operation not permitted`); the same suite was rerun with access to the disposable database. An earlier boundary test exposed escaped surrogate byte counting and was corrected to measure actual UTF-8 bytes. Final command `DVP_TEST_DB_URL=jdbc:postgresql://127.0.0.1:55439/dvp_test mvn -o clean verify`: **81 tests, 0 failures/errors/skips**, including 17 document integration tests and 3 document validation unit tests; JAR packaging succeeded. `git diff --check` passed.
+- **Approval:** pending. Review the implemented phase and its verification before phase 5. Production deployment, actual capacity/large-scale cascade measurement and restoration from backup have not been exercised.
 
 ### Final verification and resumption
 
@@ -425,4 +433,4 @@ Additional review checks extend this matrix without renumbering the specificatio
 - Final source-based `docker build -t dvp-phases-review .` succeeded after package separation. The resulting image served health/v1 stores and v2 Unicode collection listing, replayed the persisted 201/Location response created by the earlier JAR, and exposed both versions in OpenAPI. Both Compose files passed `docker compose ... config --quiet`.
 - Follow-up on 2026-11-04: a collection POST without `Idempotency-Key` reproduced a generic 400. The v2 handler now names that missing header without exposing supplied values; the status, code and response shape remain unchanged. `mvn -o -Dtest=MissingIdempotencyHeaderTest,RequestFilterTest test` passed 3 tests. `mvn -o test` passed with 61 tests reported, 18 integration tests skipped because their opt-in database was not configured. A retry of the user's requested collection with the required header returned 201 and a subsequent GET returned 200.
 - Temporary application/test services were stopped after verification; no containers, database volumes or images were deleted. The test server's isolated data is retained in its disposable container; no application/production database was touched.
-- Resume with review/explicit approval of the completed phases and any requested corrections. Phase 4 and every later phase remain unstarted. Preserve the package boundaries and use the same migration history; do not re-baseline an upgraded installation.
+- Resume with review/explicit approval of completed phases and requested corrections. Phase 5 and later remain unstarted. Preserve the package boundaries and use the same migration history; do not re-baseline an upgraded installation.

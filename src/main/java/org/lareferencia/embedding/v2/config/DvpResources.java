@@ -54,7 +54,9 @@ public class DvpResources {
   }
   @Bean TransactionTemplate writeTransactions(@Qualifier("transactionManager") PlatformTransactionManager manager,
       DvpProperties p) {
-    var tx = new TransactionTemplate(manager); tx.setTimeout(p.getWriteTimeoutSeconds()); return tx;
+    var tx = new TransactionTemplate(manager);
+    tx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+    tx.setTimeout(p.getWriteTimeoutSeconds()); return tx;
   }
   @Bean(destroyMethod="shutdownNow")
   ThreadPoolExecutor inferenceExecutor(DvpProperties p) {
