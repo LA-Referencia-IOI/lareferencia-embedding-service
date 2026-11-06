@@ -1,0 +1,32 @@
+# Active, secret-free configuration. An optional local application.yml may override it.
+server.port=${SERVER_PORT:8989}
+spring.application.name=lareferencia-embedding-service
+spring.datasource.url=${DB_URL:jdbc:postgresql://localhost:5432/embeddings}
+spring.datasource.username=${DB_USER:embeddings}
+spring.datasource.password=${DB_PASSWORD:}
+spring.jpa.hibernate.ddl-auto=validate
+spring.jpa.open-in-view=false
+spring.jpa.properties.hibernate.jdbc.time_zone=UTC
+spring.flyway.baseline-on-migrate=false
+spring.flyway.baseline-version=1
+spring.flyway.default-schema=public
+spring.flyway.clean-disabled=true
+app.embedding.provider.type=${EMBEDDING_PROVIDER:OLLAMA}
+app.embedding.provider.ollama-url=${OLLAMA_URL:http://100.64.0.27:11434/v1/embeddings}
+app.embedding.provider.openai-url=${OPENAI_URL:https://api.openai.com/v1/embeddings}
+app.embedding.provider.openrouter-url=${OPENROUTER_URL:https://openrouter.ai/api/v1/embeddings}
+app.embedding.provider.api-key=${EMBEDDING_PROVIDER_API_KEY:}
+app.embedding.provider.connect-timeout=${OLLAMA_CONNECT_TIMEOUT:5s}
+app.embedding.provider.request-timeout=${OLLAMA_REQUEST_TIMEOUT:30s}
+app.embedding.max-batch-size=${EMBEDDING_MAX_BATCH_SIZE:128}
+app.embedding.max-input-length=${EMBEDDING_MAX_INPUT_LENGTH:8192}
+app.pgvector.index-type=${APP_PGVECTOR_INDEX_TYPE:HNSW}
+management.endpoints.web.exposure.include=health,metrics,prometheus
+# All writers (legacy JPA and v2 JDBC) use this bounded primary pool.
+spring.datasource.hikari.maximum-pool-size=10
+spring.datasource.hikari.minimum-idle=0
+spring.datasource.hikari.connection-timeout=1000
+app.dvp.enabled=${DVP_ENABLED:true}
+app.dvp.workers-enabled=${DVP_WORKERS_ENABLED:false}
+app.dvp.role=${DVP_ROLE:API}
+
