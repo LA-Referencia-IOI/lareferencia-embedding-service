@@ -29,4 +29,8 @@ spring.datasource.hikari.connection-timeout=1000
 app.dvp.enabled=${DVP_ENABLED:true}
 app.dvp.workers-enabled=${DVP_WORKERS_ENABLED:false}
 app.dvp.role=${DVP_ROLE:API}
+app.dvp.providers.local.type=OPENAI_COMPATIBLE
+app.dvp.providers.local.endpoint=${DVP_LOCAL_PROVIDER_ENDPOINT:http://localhost:11434/v1/embeddings}
+app.dvp.workers-enabled=${DVP_WORKERS_ENABLED:false}
+
 

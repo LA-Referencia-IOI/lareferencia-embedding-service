@@ -1,6 +1,6 @@
 # Document and Vector Platform — Implementation Plan
 
-**Status:** Phases 1–4 implemented; post-implementation user approval pending. Phases 5–14 have not started. See the phase records for verification evidence.
+**Status:** Phases 1–5 implemented; post-implementation user approval pending. Phases 6–14 have not started. See the phase records for verification evidence.
 
 **Baseline examined:** `main`, commit `52aadb3642a787fefdc69d2d7676122021feeefb`, 2026-11-04. The working tree already contained a change to `.gitignore`; it is outside this plan.
 
@@ -8,7 +8,7 @@
 
 **Scope:** This repository only. No graphical interface is specified or present. Each feature phase includes its API, persistence, operational integration, OpenAPI, tests and documentation. No frontend work is assumed. Authentication remains at the existing deployment boundary; collections are not security tenants.
 
-**Execution authorization:** The user's 2026-11-04 request authorized sequential implementation of phases 1, 2 and 3; a subsequent request explicitly authorized moving v1 code into `org.lareferencia.embedding.v1`. Those requests authorize the work recorded below, but are not recorded as approval of the completed results. Phase completion/approval gates remain unchecked pending review. On 2026-11-05 the user explicitly requested phase 4; that request authorized its implementation but does not record approval of earlier results.
+**Execution authorization:** The user's 2026-11-04 request authorized sequential implementation of phases 1, 2 and 3; a subsequent request explicitly authorized moving v1 code into `org.lareferencia.embedding.v1`. Those requests authorize the work recorded below, but are not recorded as approval of the completed results. Phase completion/approval gates remain unchecked pending review. On 2026-11-05 the user explicitly requested phase 4; on 2026-11-06 the user explicitly requested phase 5. Those requests authorized the respective implementation but do not record approval of earlier results.
 
 ## How to use this plan across sessions
 
@@ -125,7 +125,7 @@ Required real-extension fixtures cover maximum finite half values (including 655
 
 Entity dependencies: `collection → document → source_text → vector_unit → vector row`; `profile + collection → indexation → dedicated vector table`; `job → item` and optional durable import file; preparation and generation require indexation, document and job runtime; import additionally uses document upsert, vector validation and checkpointing; retrieval requires current units/vectors; exact and approximate search depend on retrieval invariants and a populated index. `idempotency`, errors, cursors, config, migrations and instrumentation are shared prerequisites.
 
-Phases 1–3 are **implemented and verified, awaiting post-implementation approval**; phase 4 is **implemented and verified, awaiting approval**; phases 5–14 are **not started**. The execution authorization above covers phases 1–4. Check a phase completion box only after its common gate and explicit approval; no approval is inferred from passing tests.
+Phases 1–3 are **implemented and verified, awaiting post-implementation approval**; phase 4 is **implemented and verified, awaiting approval**; phase 5 is **implemented and verified, awaiting approval**; phases 6–14 are **not started**. The execution authorization above covers phases 1–5. Check a phase completion box only after its common gate and explicit approval; no approval is inferred from passing tests.
 
 | Complete | Phase | Focus / deliverable | Technical prerequisites | Specification acceptance | Status |
 | --- | --- | --- | --- | --- | --- |
@@ -133,7 +133,7 @@ Phases 1–3 are **implemented and verified, awaiting post-implementation approv
 | [ ] | 2 | v2 schema, shared contracts and resource isolation | 1 | T17, shared T18, T21 | Implemented; verified; approval pending |
 | [ ] | 3 | Collections | 2 | T02, T18 | Implemented; verified; approval pending |
 | [ ] | 4 | Documents and source texts | 3 | T02–T04, T18 | Implemented; verified; approval pending |
-| [ ] | 5 | Embedding profiles and provider registry | 2 | T14, T19, T20 | Not started |
+| [ ] | 5 | Embedding profiles and provider registry | 2 | T14, T19, T20 | Implemented; verified; approval pending |
 | [ ] | 6 | Persistent jobs and worker runtime | 2–4 | T15–T16, T18 | Not started |
 | [ ] | 7 | Index configurations and maintenance | 3, 5, 6 | T17, T20 | Not started |
 | [ ] | 8 | Text selection, vector units and preparation | 4, 5, 6, 7 | T04–T05, T10, T16, T19 | Not started |
@@ -202,13 +202,13 @@ The specification's six broad phases are subdivided here to keep each entity/fea
 
 **Depends on:** 2; sequentially follows approved phase 4. **Components:** profile API/repository, provider configuration/registry, preparation fingerprint, shared provider transport, OpenAPI. **Deliverable:** §4.1 and §6.1 profile administration.
 
-- [ ] Implement create/list/get profiles with required model, administrator-assigned revision, dimensions, execution mode, provider reference and preparation. Normalize specified defaults before RFC 8785 fingerprinting; unique slug/fingerprint; no secret in API/DB response. Immutable profile and reference validation; `import_only` has no provider.
-- [ ] Add individually configured OLLAMA or OPENAI_COMPATIBLE HTTP provider references, endpoint, secret reference, per-provider timeouts/batch/concurrency. Resolve by profile rather than global v1 provider; credentials stay in runtime configuration. Share tested index-aware parsing only where behavior remains compatible with phase 1.
-- [ ] Wire provider calls through phase 2's bounded inference executor/HTTP budget and provider-specific limits; test blocked/timed-out calls and exhausted capacity without consuming the write/coordination pools. Record per-instance and aggregate replica budgets before enabling provider consumers.
-- [ ] Implement identity/legacy preparation and document/query prefixes as explicit versioned functions; document limits and fingerprint semantics. No inference occurs on profile creation.
-- [ ] **Tests:** canonicalization vectors, default equivalence, fingerprint uniqueness, duplicates and invalid refs; mock two distinct provider endpoints with unordered/invalid data, secret redaction and import-only capability; real DB concurrent creation and HTTP pagination (T14, relevant T19/T20).
-- [ ] **Verify / accept:** two HTTP profiles resolve to their own provider; import-only is non-executable, profile creation never calls inference, and duplicate slug/fingerprint returns 409. A deployment-label/weights change creates a new profile rather than mutating old vectors. Risk: administrators must accurately label model revision and control confidential text sent to external services.
-- [ ] Common completion gate and explicit phase approval complete. **Record:** pending.
+- [x] Implement create/list/get profiles with required model, administrator-assigned revision, dimensions, execution mode, provider reference and preparation. Normalize specified defaults before RFC 8785 fingerprinting; unique slug/fingerprint; no secret in API/DB response. Immutable profile and reference validation; `import_only` has no provider.
+- [x] Add individually configured OLLAMA or OPENAI_COMPATIBLE HTTP provider references, endpoint, secret reference, per-provider timeouts/batch/concurrency. Resolve by profile rather than global v1 provider; credentials stay in runtime configuration. Share tested index-aware parsing only where behavior remains compatible with phase 1.
+- [x] Wire provider calls through phase 2's bounded inference executor/HTTP budget and provider-specific limits; test blocked/timed-out calls and exhausted capacity without consuming the write/coordination pools. Record per-instance and aggregate replica budgets before enabling provider consumers.
+- [x] Implement identity/legacy preparation and document/query prefixes as explicit versioned functions; document limits and fingerprint semantics. No inference occurs on profile creation.
+- [x] **Tests:** canonicalization vectors, default equivalence, fingerprint uniqueness, duplicates and invalid refs; mock two distinct provider endpoints with unordered/invalid data, secret redaction and import-only capability; real DB concurrent creation and HTTP pagination (T14, relevant T19/T20).
+- [x] **Verify / accept:** two HTTP profiles resolve to their own provider; import-only is non-executable, profile creation never calls inference, and duplicate slug/fingerprint returns 409. A deployment-label/weights change creates a new profile rather than mutating old vectors. Risk: administrators must accurately label model revision and control confidential text sent to external services.
+- [ ] Common completion gate and explicit phase approval complete. **Record:** implemented and verified; user approval pending (see phase 5 record).
 
 ### Phase 6 — Persistent jobs and worker runtime
 
@@ -425,6 +425,14 @@ Additional review checks extend this matrix without renumbering the specificatio
 - **Verification:** focused tests cover validation, special IDs, exact hash and numeric metadata, PATCH/PUT/no-op semantics, revision/precondition behavior, replay, limits, listing, debug redaction, cross-indexation vectors, rollback and concurrent writes/deletes. A sandboxed test attempt could not connect to localhost (`Operation not permitted`); the same suite was rerun with access to the disposable database. An earlier boundary test exposed escaped surrogate byte counting and was corrected to measure actual UTF-8 bytes. Final command `DVP_TEST_DB_URL=jdbc:postgresql://127.0.0.1:55439/dvp_test mvn -o clean verify`: **81 tests, 0 failures/errors/skips**, including 17 document integration tests and 3 document validation unit tests; JAR packaging succeeded. `git diff --check` passed.
 - **Approval:** pending. Review the implemented phase and its verification before phase 5. Production deployment, actual capacity/large-scale cascade measurement and restoration from backup have not been exercised.
 
+### Phase 5 record — 2026-11-06
+
+- **Authorization and baseline:** the user explicitly requested phase 5. Starting commit `20a17cc`; earlier phase approvals remain pending and are not inferred. The working tree was clean at the start.
+- **Implementation:** profile create/list/get uses the V3 registry, transactional idempotency, UUID keyset pagination, normalized RFC 8785 fingerprints, immutable API semantics, and explicit provider references. The runtime registry resolves HTTP profiles to separate OLLAMA or OPENAI_COMPATIBLE endpoints; credentials are environment-variable references, not database or API values. Bounded per-provider and shared inference capacity and HTTP timeouts prevent provider calls from using database pools. Profile creation does not perform inference.
+- **Preparation and compatibility:** `identity-v1` and a frozen `legacy-normalizer-v1` are versioned independently of future v1 changes. Prefixes and provider references participate in profile fingerprints. The existing V3 schema needs no migration or v1 reindex; v2 strict parsing rejects nonintegral or string-valued dimensions. See [profile and provider operations](phase-5-profiles.md) for configuration, replica capacity budgeting, security, migration and rollback.
+- **Verification:** `DVP_TEST_DB_URL=jdbc:postgresql://127.0.0.1:55439/dvp_test mvn -o clean verify` passed **93 tests, 0 failures/errors/skips**, with JAR packaging. Focused tests cover canonical fingerprints, defaults, profile conflicts, concurrent creation, pagination, provider routing, unordered/invalid responses, sanitized errors, import-only behavior, timeouts and saturated capacity. Mock endpoints and synthetic input are used; no external model service is contacted.
+- **Approval:** pending. The user must review the phase before phase 6. Actual model behavior, provider performance, live credentials and production aggregate replica capacity have not been exercised; future worker phases must integrate persistent retries and provider-specific operational limits.
+
 ### Final verification and resumption
 
 - Final command: `DVP_TEST_DB_URL=jdbc:postgresql://127.0.0.1:55439/dvp_test mvn clean verify`. Recorded result after versioned-package and scoped-handler changes: **60 tests, 0 failures/errors/skips**, JAR packaging successful.
@@ -433,4 +441,4 @@ Additional review checks extend this matrix without renumbering the specificatio
 - Final source-based `docker build -t dvp-phases-review .` succeeded after package separation. The resulting image served health/v1 stores and v2 Unicode collection listing, replayed the persisted 201/Location response created by the earlier JAR, and exposed both versions in OpenAPI. Both Compose files passed `docker compose ... config --quiet`.
 - Follow-up on 2026-11-04: a collection POST without `Idempotency-Key` reproduced a generic 400. The v2 handler now names that missing header without exposing supplied values; the status, code and response shape remain unchanged. `mvn -o -Dtest=MissingIdempotencyHeaderTest,RequestFilterTest test` passed 3 tests. `mvn -o test` passed with 61 tests reported, 18 integration tests skipped because their opt-in database was not configured. A retry of the user's requested collection with the required header returned 201 and a subsequent GET returned 200.
 - Temporary application/test services were stopped after verification; no containers, database volumes or images were deleted. The test server's isolated data is retained in its disposable container; no application/production database was touched.
-- Resume with review/explicit approval of completed phases and requested corrections. Phase 5 and later remain unstarted. Preserve the package boundaries and use the same migration history; do not re-baseline an upgraded installation.
+- Resume with review/explicit approval of completed phases and requested corrections. Phase 6 and later remain unstarted. Preserve the package boundaries and use the same migration history; do not re-baseline an upgraded installation.

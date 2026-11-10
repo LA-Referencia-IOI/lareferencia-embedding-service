@@ -25,6 +25,9 @@ public class V2JsonConfig implements WebMvcConfigurer {
         .setCoercion(com.fasterxml.jackson.databind.cfg.CoercionInputShape.Integer, com.fasterxml.jackson.databind.cfg.CoercionAction.Fail)
         .setCoercion(com.fasterxml.jackson.databind.cfg.CoercionInputShape.Float, com.fasterxml.jackson.databind.cfg.CoercionAction.Fail)
         .setCoercion(com.fasterxml.jackson.databind.cfg.CoercionInputShape.Boolean, com.fasterxml.jackson.databind.cfg.CoercionAction.Fail);
+    strict.coercionConfigFor(com.fasterxml.jackson.databind.type.LogicalType.Integer)
+        .setCoercion(com.fasterxml.jackson.databind.cfg.CoercionInputShape.Float, com.fasterxml.jackson.databind.cfg.CoercionAction.Fail)
+        .setCoercion(com.fasterxml.jackson.databind.cfg.CoercionInputShape.String, com.fasterxml.jackson.databind.cfg.CoercionAction.Fail);
     converters.addFirst(new MappingJackson2HttpMessageConverter(strict) {
       private boolean v2(Class<?> type) { return type.getName().startsWith("org.lareferencia.embedding.v2."); }
       @Override public boolean canRead(Class<?> clazz, MediaType mediaType) {
