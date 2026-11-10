@@ -647,6 +647,8 @@ The [official pgvector documentation](https://github.com/pgvector/pgvector#refer
 
 **This platform's own policy:** pgvector >= 0.8.0, float32 `vector(D)` storage always. Native ANN up to 2000; between 2001 and 4000 only explicit `hnsw_halfvec`; above 4000 up to 16000 exact only. Outside the range, 422. IVFFlat is not implemented as an initial v2 strategy; its availability in v1 is not changed. Do not truncate dimensions. Binary quantization and subvectors are left for another version.
 
+For halfvec ANN, admission rejects finite float32 values whose half precision conversion overflows and, for cosine, vectors whose converted components all become zero. Float32 storage remains unchanged. The same check applies to source and query vectors. An incompatible existing row prevents ANN readiness during build or reconciliation; exact access and the stored values remain available. The rejection code for later vector ingestion is `halfvec_not_representable`.
+
 Expression proposal for 3072 dimensions and cosine:
 
 ```sql

@@ -31,3 +31,107 @@ For isolated real-database verification, configure the disposable pgvector test 
 ```bash
 DVP_TEST_DB_URL=jdbc:postgresql://127.0.0.1:55439/dvp_test mvn -o clean verify
 ```
+
+## Request and response examples
+
+Examples use `http://localhost:8989`; substitute the UUIDs returned by your server. Response IDs, timestamps and hashes are illustrative. `If-Match` uses the current quoted ETag and is optional. Requests that create or change a document can optionally include an `Idempotency-Key`.
+
+### PATCH: create or partially update by external ID
+
+```http
+PATCH /api/v2/collections/11111111-1111-4111-8111-111111111111/documents/by-external-id?external_id=doi%3A10.1234%2Fexample
+Content-Type: application/json
+
+{"metadata":{"title":"Example"},"texts":[{"text_id":"abstract","kind":"abstract","language":"en","content":"Example text."}]}
+```
+
+```http
+HTTP/1.1 201 Created
+Location: /api/v2/collections/11111111-1111-4111-8111-111111111111/documents/22222222-2222-4222-8222-222222222222
+ETag: "1"
+Content-Type: application/json
+
+{"id":"22222222-2222-4222-8222-222222222222","external_id":"doi:10.1234/example","collection_id":"11111111-1111-4111-8111-111111111111","revision":1,"metadata":{"title":"Example"},"texts":[{"text_id":"abstract","kind":"abstract","language":"en","content":"Example text.","revision":1,"content_hash":"14a30c9b8fabb27151dfbf709bc2f5bf32743b1f02813e140deb02f54b1ca70c","updated_at":"2026-11-10T12:00:00Z"}],"created_at":"2026-11-10T12:00:00Z","updated_at":"2026-11-10T12:00:00Z"}
+```
+
+An existing document returns 200 with its current representation and ETag.
+
+### PUT: replace a snapshot
+
+```http
+PUT /api/v2/collections/11111111-1111-4111-8111-111111111111/documents/by-external-id?external_id=doi%3A10.1234%2Fexample
+Content-Type: application/json
+If-Match: "1"
+
+{"metadata":{"title":"Revised"},"texts":[]}
+```
+
+```http
+HTTP/1.1 200 OK
+ETag: "2"
+Content-Type: application/json
+
+{"id":"22222222-2222-4222-8222-222222222222","external_id":"doi:10.1234/example","collection_id":"11111111-1111-4111-8111-111111111111","revision":2,"metadata":{"title":"Revised"},"texts":[],"created_at":"2026-11-10T12:00:00Z","updated_at":"2026-11-10T12:01:00Z"}
+```
+
+A new snapshot returns 201 and a Location. An outdated `If-Match` returns 412.
+
+### GET: retrieve by external ID or document UUID
+
+```http
+GET /api/v2/collections/11111111-1111-4111-8111-111111111111/documents/by-external-id?external_id=doi%3A10.1234%2Fexample
+```
+
+```http
+GET /api/v2/collections/11111111-1111-4111-8111-111111111111/documents/22222222-2222-4222-8222-222222222222
+```
+
+Both return the same full representation:
+
+```http
+HTTP/1.1 200 OK
+ETag: "2"
+Content-Type: application/json
+
+{"id":"22222222-2222-4222-8222-222222222222","external_id":"doi:10.1234/example","collection_id":"11111111-1111-4111-8111-111111111111","revision":2,"metadata":{"title":"Revised"},"texts":[],"created_at":"2026-11-10T12:00:00Z","updated_at":"2026-11-10T12:01:00Z"}
+```
+
+### GET: list documents
+
+```http
+GET /api/v2/collections/11111111-1111-4111-8111-111111111111/documents?limit=100&include=metadata
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"items":[{"id":"22222222-2222-4222-8222-222222222222","external_id":"doi:10.1234/example","collection_id":"11111111-1111-4111-8111-111111111111","revision":2,"metadata":{"title":"Revised"},"created_at":"2026-11-10T12:00:00Z","updated_at":"2026-11-10T12:01:00Z"}],"next_cursor":null}
+```
+
+Without `include=metadata`, the summary omits metadata. Pass a returned non-null `next_cursor` as `cursor` to fetch the next page.
+
+### DELETE: one text or the complete document
+
+These are independent examples; the text must exist before deleting it.
+
+```http
+DELETE /api/v2/collections/11111111-1111-4111-8111-111111111111/documents/22222222-2222-4222-8222-222222222222/texts?text_id=abstract
+If-Match: "1"
+```
+
+```http
+HTTP/1.1 204 No Content
+ETag: "2"
+```
+
+```http
+DELETE /api/v2/collections/11111111-1111-4111-8111-111111111111/documents/22222222-2222-4222-8222-222222222222
+If-Match: "2"
+```
+
+```http
+HTTP/1.1 204 No Content
+```
+
+A 204 response has no body.

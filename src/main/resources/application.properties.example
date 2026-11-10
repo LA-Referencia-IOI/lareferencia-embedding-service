@@ -31,6 +31,9 @@ app.dvp.workers-enabled=${DVP_WORKERS_ENABLED:false}
 app.dvp.role=${DVP_ROLE:API}
 app.dvp.providers.local.type=OPENAI_COMPATIBLE
 app.dvp.providers.local.endpoint=${DVP_LOCAL_PROVIDER_ENDPOINT:http://localhost:11434/v1/embeddings}
-app.dvp.workers-enabled=${DVP_WORKERS_ENABLED:false}
+app.dvp.worker-concurrency=${DVP_WORKER_CONCURRENCY:4}
+app.dvp.worker-poll-millis=${DVP_WORKER_POLL_MILLIS:1000}
+app.dvp.lease-seconds=${DVP_LEASE_SECONDS:120}
+app.dvp.heartbeat-seconds=${DVP_HEARTBEAT_SECONDS:20}
 
 

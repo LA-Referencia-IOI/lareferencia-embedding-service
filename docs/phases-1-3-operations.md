@@ -1,9 +1,9 @@
 # Phases 1–3: operation, compatibility and verification
 
 This release preserves the v1 embedding API, introduces an additive `dvp` registry
-and implements v2 Collections. Phase 4 also exposes the [document and source-text
-API](phase-4-documents.md); profile/indexation/job/import/search APIs and workers
-belong to later phases. No UI is included.
+and implements v2 Collections. The current implementation also exposes the [document API](phase-4-documents.md),
+[profile API](phase-5-profiles.md), and [job and indexation APIs](phases-5-6-persistent-jobs.md).
+Preparation, generation, import and search belong to later phases. No UI is included.
 The existing deployment access boundary applies; a collection is not a security tenant.
 
 ## Java package boundaries
@@ -46,10 +46,11 @@ SELECT current_setting('server_version'), extversion
 FROM pg_extension WHERE extname = 'vector';
 ```
 
-`DVP_ENABLED=false` is the default. Set it to `true` to enable Collections.
-`DVP_ROLE=API` is the default; `WORKER` suppresses v2 HTTP routes and `ALL` allows
-them. `DVP_WORKERS_ENABLED` defaults to false; no worker engine is implemented in
-Phases 1–3, so keep it false. These flags do not remove schema/data or disable v1.
+The current tracked `application.properties` defaults `DVP_ENABLED=true`,
+`DVP_ROLE=ALL`, and `DVP_WORKERS_ENABLED=true`; the example configuration and
+Java-only defaults may differ. Set these variables explicitly for your deployment.
+`WORKER` suppresses the job and indexation HTTP controllers; `API` and `ALL` allow them.
+Set workers enabled only on instances intended to execute jobs. These flags do not remove schema/data or disable v1.
 The registry migrations run even with v2 disabled, making deployment additive.
 
 ## Fresh and existing database migrations
@@ -61,10 +62,11 @@ Flyway history lives in `public.flyway_schema_history`, and cleaning is disabled
 | --- | --- |
 | V1 | Fresh `stores` table with the existing v1 columns/constraints. |
 | V2 | Duplicate preflight and unique indexes on `lower(name)` and `(lower(model), embedding_dimension)`. No rows or vector tables are rewritten. |
-| V3 | Separate `dvp` static registry for the complete design. No dynamic vector table or unfinished API is created. Adds persisted replay headers and optional job linkage for active-job key retention. |
+| V3 | Separate `dvp` static registry. Adds persisted replay headers and optional job linkage for active-job key retention. |
+| V4 | Adds job error code, item retry time and job runtime indexes. |
 
 For a fresh database, start normally after installing the extension. Flyway applies
-V1–V3 and Hibernate validates `stores`. For a populated legacy installation without
+V1–V4 and Hibernate validates `stores`. For a populated legacy installation without
 Flyway history, normal startup deliberately fails rather than guessing a baseline.
 Do the following on an isolated copy first; schedule the actual deployment separately:
 
@@ -97,7 +99,7 @@ Do the following on an isolated copy first; schedule the actual deployment separ
    ```
 
    This records V1 as the operator-verified legacy baseline, skips recreating `stores`,
-   and applies V2–V3. Do not baseline at V2/V3: that would skip required upgrades.
+   and applies V2–V4. Do not baseline at V2/V3/V4: that would skip required upgrades.
    Remove the temporary baseline-on-migrate override for subsequent startups.
 5. Verify migration history, row/vector samples, case-insensitive duplicate 409s,
    `/api/v1/stores`, embeddings/cache behavior and `/api/v1/status`. Enable v2 only
@@ -161,15 +163,15 @@ no additional service or broker is introduced. Per-instance defaults:
 | `spring.datasource.hikari.maximum-pool-size` | 10 write connections, shared by legacy JPA and atomic v2 JDBC writes. |
 | `app.dvp.read-connections` | 8 search/read connections; read transactions use repeatable read; statement/read timeout 60 s. |
 | `app.dvp.coordination-connections` | 2 reserved for short claims/heartbeats/diagnostics; statement timeout 5 s. |
-| `app.dvp.lock-connections` | 4 separate connections reserved for future session advisory locks. |
+| `app.dvp.lock-connections` | 4 separate connections reserved for session advisory locks. |
 | `app.dvp.connection-timeout-ms` | 1000 ms borrow timeout for v2 pools; primary pool has its own Hikari connection-timeout (1000 ms default). |
 | `app.dvp.inference-concurrency` | 4 executor threads with no queued backlog; excess submission rejects immediately. Future provider clients/jobs must use this budget. |
 | `app.dvp.write-timeout-seconds` | 30 s for atomic v2 write transactions. |
 | `app.dvp.max-request-bytes` | 16 MiB for current v2 requests, checked by header and streaming count. |
 | `app.dvp.idempotency-retention-days` | At least 7; active linked jobs prevent expiry. |
 
-The upper bound is 24 pooled database connections per enabled instance with these
-settings (10 + 8 + 2 + 4), multiplied by replicas; idle minimum is zero. Inference
+The upper bound is 25 pooled database connections per enabled instance with these
+settings (10 + 8 + 2 + 4 + 1 maintenance connection), multiplied by replicas; idle minimum is zero. Inference
 has a separate executor, not a database pool. `writeTransactions` uses the primary
 JPA transaction manager and its same JDBC connection; `readTransactions` uses the
 read datasource. Coordination/lock connections never split a document's atomic
@@ -182,7 +184,7 @@ search 60/10 s and 2/16 admissions, 10 GiB files, internal file root `./data/imp
 24-hour temporary and 30-day terminal retention, 120-second leases, 20-second
 heartbeats, 1000 active items, batches of 100 documents/128 provider inputs and
 5/30-second provider connect/request timeouts. These do not expose or implement the
-later APIs. No halfvec admission policy or dynamic ANN is implemented before phase 7.
+later APIs. Phase 7 implements halfvec admission validation and dynamic ANN maintenance.
 
 ## Reproducible verification
 
@@ -220,8 +222,116 @@ it must not manage v2 entities. Rehearse on a copy first. Do not run Flyway clea
 destructive down migrations, drop schemas or delete vectors as an application rollback.
 A data rollback requires your consistent backup/restore procedure and separate approval.
 
-No vector reindex or inference is required by V1–V3. The lower-case uniqueness indexes
+No vector reindex or inference is required by V1–V4. The lower-case uniqueness indexes
 are administrative store indexes, not ANN rebuilds. Existing hashes cannot reconstruct
 source documents and are not imported into v2. Future changes in profile/model revision,
 preparation, dimensions or metric require a new immutable profile/indexation and
 explicit generation/import; they are not performed by this release.
+
+## HTTP examples: collections and v1 endpoints
+
+These examples show representative responses. UUIDs, timestamps, vectors and resource statistics vary. Create a compatible store and configure its provider before calling the v1 embeddings endpoint; that request may send its input to the provider.
+
+### POST /api/v2/collections
+
+```http
+POST /api/v2/collections
+Content-Type: application/json
+Idempotency-Key: collection-research-001
+
+{"slug":"research","name":"Investigación Abierta"}
+```
+
+```http
+HTTP/1.1 201 Created
+Location: /api/v2/collections/11111111-1111-4111-8111-111111111111
+Content-Type: application/json
+
+{"id":"11111111-1111-4111-8111-111111111111","slug":"research","name":"Investigación Abierta","created_at":"2026-11-10T12:00:00Z"}
+```
+
+### GET /api/v2/collections
+
+```http
+GET /api/v2/collections?limit=100
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"items":[{"id":"11111111-1111-4111-8111-111111111111","slug":"research","name":"Investigación Abierta","created_at":"2026-11-10T12:00:00Z"}],"next_cursor":null}
+```
+
+### GET /api/v2/collections/{id}
+
+```http
+GET /api/v2/collections/11111111-1111-4111-8111-111111111111
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"id":"11111111-1111-4111-8111-111111111111","slug":"research","name":"Investigación Abierta","created_at":"2026-11-10T12:00:00Z"}
+```
+
+### POST /api/v1/stores
+
+```http
+POST /api/v1/stores
+Content-Type: application/json
+
+{"name":"Example Store","model":"example-model","dimensions":3,"createVectorIndex":false}
+```
+
+```http
+HTTP/1.1 201 Created
+Content-Type: application/json
+
+{"id":"55555555-5555-4555-8555-555555555555","name":"Example Store","model":"example-model","provider":"ollama","embeddingDimensions":3,"createdAt":"2026-11-10T12:00:00Z"}
+```
+
+### GET /api/v1/stores
+
+```http
+GET /api/v1/stores
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+[{"id":"55555555-5555-4555-8555-555555555555","name":"Example Store","model":"example-model","provider":"ollama","embeddingDimensions":3,"createdAt":"2026-11-10T12:00:00Z"}]
+```
+
+### POST /api/v1/embeddings
+
+```http
+POST /api/v1/embeddings
+Content-Type: application/json
+
+{"model":"example-model","dimensions":3,"input":"Example text."}
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"storeId":"55555555-5555-4555-8555-555555555555","storeName":"Example Store","model":"example-model","provider":"ollama","object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2,0.3]}],"usage":{"prompt_tokens":0,"total_tokens":0}}
+```
+
+Vector components and token usage depend on the provider and input.
+
+### GET /api/v1/status
+
+```http
+GET /api/v1/status
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"timestamp":"2026-11-10T12:00:00Z","system":{"cpu":{"availableProcessors":4,"usagePercent":20.0,"freePercent":80.0,"systemLoadAverage":1.0},"ram":{"totalBytes":1000,"usedBytes":400,"freeBytes":600,"usagePercent":40.0,"freePercent":60.0,"total":"1000 B","used":"400 B","free":"600 B"},"disk":{"totalBytes":1000,"usedBytes":400,"freeBytes":600,"usableBytes":600,"usagePercent":40.0,"freePercent":60.0,"total":"1000 B","used":"400 B","free":"600 B","usable":"600 B","volumes":[]}},"database":{"name":"embeddings","sizeBytes":1000,"size":"1000 B","storeCount":0,"embeddingTableCount":0,"embeddingTables":[]}}
+```

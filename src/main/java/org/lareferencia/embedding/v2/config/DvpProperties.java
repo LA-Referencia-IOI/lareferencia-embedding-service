@@ -39,6 +39,8 @@ public class DvpProperties {
   @Min(7) private int idempotencyRetentionDays = 7;
   @Min(1) private int leaseSeconds = 120;
   @Min(1) private int heartbeatSeconds = 20;
+  @Min(1) private int workerConcurrency = 4;
+  @Min(100) private int workerPollMillis = 1000;
   @Min(1) private int maxActiveItems = 1000;
   @Min(1) private int documentBatchSize = 100;
   @Min(1) private int providerBatchSize = 128;

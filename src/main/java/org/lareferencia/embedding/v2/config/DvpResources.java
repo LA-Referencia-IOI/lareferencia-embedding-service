@@ -39,11 +39,22 @@ public class DvpResources {
   HikariDataSource lockDataSource(DataSourceProperties db, DvpProperties p) {
     return pool(db,p,"dvp-locks",p.getLockConnections(),p.getCoordinationTimeoutSeconds());
   }
+  @Bean(destroyMethod="close")
+  HikariDataSource maintenanceDataSource(DataSourceProperties db, DvpProperties p) {
+    return pool(db,p,"dvp-maintenance",1,0);
+  }
   @Bean JdbcTemplate readJdbc(@Qualifier("readDataSource") DataSource ds, DvpProperties p) {
     var jdbc = new JdbcTemplate(ds); jdbc.setQueryTimeout(p.getExactTimeoutSeconds()); return jdbc;
   }
   @Bean JdbcTemplate coordinationJdbc(@Qualifier("coordinationDataSource") DataSource ds, DvpProperties p) {
     var jdbc = new JdbcTemplate(ds); jdbc.setQueryTimeout(p.getCoordinationTimeoutSeconds()); return jdbc;
+  }
+  @Bean TransactionTemplate coordinationTransactions(@Qualifier("coordinationDataSource") DataSource ds,
+      DvpProperties p) {
+    var tx = new TransactionTemplate(new DataSourceTransactionManager(ds));
+    tx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+    tx.setTimeout(p.getCoordinationTimeoutSeconds());
+    return tx;
   }
   @Bean TransactionTemplate readTransactions(@Qualifier("readDataSource") DataSource ds, DvpProperties p) {
     var tx = new TransactionTemplate(new DataSourceTransactionManager(ds));

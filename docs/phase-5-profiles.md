@@ -37,8 +37,58 @@ app:
 
 The full endpoint must be HTTP(S), without embedded user credentials, query, or fragment. `secret-ref` names an environment variable containing the bearer token; it is resolved only for a provider call and is never stored in the profile or returned by the API. Provider type, endpoint and credentials are runtime settings, not proof of model identity. Rotate credentials independently; change the revision and profile whenever a deployment changes vector space. Do not send confidential content to an external provider without appropriate authorization.
 
-Provider concurrency and batch sizes are per provider, per process. The shared `app.dvp.inference-concurrency` bounds active calls per instance across providers; excess work fails with 503 rather than occupying database write or coordination pools. Budget aggregate calls as the sum across all API/worker replicas before enabling inference consumers, taking each provider's own limits into account. Request/connect timeouts bound individual calls; a timeout may still have incurred provider charges. The caller must finish its database transaction before invoking the provider. Future persistent workers own retry and backoff; profile creation does not retry or call providers. OpenAI-compatible responses are checked and reordered by index; Ollama `/api/embed` responses are checked in input order. All returned vectors must match the dimensions and contain finite float32 values. Avoid HTTP/JDBC payload tracing in environments containing private content or credentials.
+Provider concurrency and batch sizes are per provider, per process. The shared `app.dvp.inference-concurrency` bounds active calls per instance across providers; excess work fails with 503 rather than occupying database write or coordination pools. Budget aggregate calls as the sum across all API/worker replicas before enabling inference consumers, taking each provider's own limits into account. Request/connect timeouts bound individual calls; a timeout may still have incurred provider charges. The caller must finish its database transaction before invoking the provider. Persistent workers own retry and backoff; profile creation does not retry or call providers. OpenAI-compatible responses are checked and reordered by index; Ollama `/api/embed` responses are checked in input order. All returned vectors must match the dimensions and contain finite float32 values. Avoid HTTP/JDBC payload tracing in environments containing private content or credentials.
 
-The existing V3 registry table and uniqueness constraints are reused; no schema migration or legacy reindex is required. V1 providers and stored vectors are unchanged. Rollback can disable v2 or restore the earlier application while retaining the V3 schema and profiles. Profile records already in use must not be mutated in the database; restore from a consistent backup if necessary. Phase 5 adds no generation, search, jobs, or data migration; those remain separate phases.
+The existing V3 registry table and uniqueness constraints are reused; no schema migration or legacy reindex is required. V1 providers and stored vectors are unchanged. Rollback can disable v2 or restore the earlier application while retaining the V3 schema and profiles. Profile records already in use must not be mutated in the database; restore from a consistent backup if necessary. The profile API does not itself start jobs or generate vectors; preparation, generation and search remain separate phases.
 
 For verification, start an isolated pgvector test database as described in [Phases 1–3 operations](phases-1-3-operations.md#reproducible-verification) and run `DVP_TEST_DB_URL=jdbc:postgresql://127.0.0.1:55439/dvp_test mvn -o clean verify`. The provider tests use local synthetic HTTP endpoints and do not contact configured external services.
+
+## Request and response examples
+
+These examples use an `import_only` profile so they do not depend on a configured provider. UUIDs, timestamps and fingerprint are illustrative. Replace them with values returned by the server.
+
+### POST: create a profile
+
+```http
+POST /api/v2/embedding-profiles
+Content-Type: application/json
+Idempotency-Key: profile-import-001
+
+{"slug":"research-v1","model":"bge-m3","model_revision":"deployment-2026-11","dimensions":1024,"execution_mode":"import_only","preparation":{"version":"identity-v1"}}
+```
+
+```http
+HTTP/1.1 201 Created
+Location: /api/v2/embedding-profiles/33333333-3333-4333-8333-333333333333
+Content-Type: application/json
+
+{"id":"33333333-3333-4333-8333-333333333333","slug":"research-v1","model":"bge-m3","model_revision":"deployment-2026-11","dimensions":1024,"execution_mode":"import_only","provider_ref":null,"preparation":{"version":"identity-v1","document_prefix":"","query_prefix":""},"fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","inference_capable":false,"created_at":"2026-11-10T12:00:00Z"}
+```
+
+### GET: retrieve a profile
+
+```http
+GET /api/v2/embedding-profiles/33333333-3333-4333-8333-333333333333
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"id":"33333333-3333-4333-8333-333333333333","slug":"research-v1","model":"bge-m3","model_revision":"deployment-2026-11","dimensions":1024,"execution_mode":"import_only","provider_ref":null,"preparation":{"version":"identity-v1","document_prefix":"","query_prefix":""},"fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","inference_capable":false,"created_at":"2026-11-10T12:00:00Z"}
+```
+
+### GET: list profiles
+
+```http
+GET /api/v2/embedding-profiles?limit=100
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"items":[{"id":"33333333-3333-4333-8333-333333333333","slug":"research-v1","model":"bge-m3","model_revision":"deployment-2026-11","dimensions":1024,"execution_mode":"import_only","provider_ref":null,"preparation":{"version":"identity-v1","document_prefix":"","query_prefix":""},"fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","inference_capable":false,"created_at":"2026-11-10T12:00:00Z"}],"next_cursor":null}
+```
+
+For a subsequent page, send the returned non-null `next_cursor` as `cursor`.
