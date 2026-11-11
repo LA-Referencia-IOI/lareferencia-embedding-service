@@ -96,22 +96,38 @@ public class IndexMaintenanceHandler implements JobHandler {
        SELECT EXISTS(SELECT 1 FROM pg_class t JOIN pg_namespace n ON n.oid=t.relnamespace
          JOIN pg_attribute a ON a.attrelid=t.oid AND a.attname='embedding' AND NOT a.attisdropped
          WHERE n.nspname='dvp' AND t.relname=? AND t.relkind='r' AND format_type(a.atttypid,a.atttypmod)=?
+         AND NOT EXISTS (SELECT 1 FROM (VALUES
+           ('unit_id','uuid',true),('document_id','uuid',true),('source_text_id','uuid',true),
+           ('source_revision','bigint',true),('indexation_id','uuid',true),('embedding',?,true),
+           ('input_hash','character(64)',true),('origin','character varying(10)',true),
+           ('origin_job_id','uuid',false),('created_at','timestamp with time zone',true)
+         ) expected(name,datatype,required) WHERE NOT EXISTS
+           (SELECT 1 FROM pg_attribute col WHERE col.attrelid=t.oid AND col.attname=expected.name
+             AND NOT col.attisdropped AND format_type(col.atttypid,col.atttypmod)=expected.datatype
+             AND (NOT expected.required OR col.attnotnull)))
          AND EXISTS(SELECT 1 FROM pg_constraint fk WHERE fk.conrelid=t.oid AND fk.contype='f'
            AND fk.confrelid='dvp.vector_units'::regclass AND fk.convalidated
-           AND pg_get_constraintdef(fk.oid) LIKE 'FOREIGN KEY (unit_id, document_id, source_text_id, source_revision, indexation_id)%')
+           AND fk.confdeltype='c'
+           AND (SELECT array_agg(a.attname::text ORDER BY k.n) FROM unnest(fk.conkey) WITH ORDINALITY k(attnum,n)
+             JOIN pg_attribute a ON a.attrelid=fk.conrelid AND a.attnum=k.attnum)=ARRAY['unit_id','document_id','source_text_id','source_revision','indexation_id']
+           AND (SELECT array_agg(a.attname::text ORDER BY k.n) FROM unnest(fk.confkey) WITH ORDINALITY k(attnum,n)
+             JOIN pg_attribute a ON a.attrelid=fk.confrelid AND a.attnum=k.attnum)=ARRAY['id','document_id','source_text_id','source_revision','indexation_id'])
+         AND EXISTS(SELECT 1 FROM pg_constraint pk WHERE pk.conrelid=t.oid AND pk.contype='p'
+           AND pg_get_constraintdef(pk.oid)='PRIMARY KEY (unit_id)')
          AND EXISTS(SELECT 1 FROM pg_constraint ck WHERE ck.conrelid=t.oid AND ck.contype='c'
-           AND ck.convalidated AND pg_get_constraintdef(ck.oid) LIKE '%indexation_id%' AND pg_get_constraintdef(ck.oid) LIKE ?))
-       """,Boolean.class,x.table(),"vector("+x.dims()+")","%"+x.id()+"%"));
+           AND ck.convalidated AND pg_get_expr(ck.conbin,ck.conrelid)=?))
+       """,Boolean.class,x.table(),"vector("+x.dims()+")","vector("+x.dims()+")","(indexation_id = '"+x.id()+"'::uuid)"));
   }
   private String annStatus(Index x,Connection connection) {
     var rows=maintenanceJdbc(connection).query("""
-      SELECT i.indisvalid AND i.indisready AND am.amname='hnsw' AND opc.opcname=?
-        AND ((?='hnsw_vector' AND pg_get_indexdef(i.indexrelid,1,true)='embedding') OR (?='hnsw_halfvec' AND pg_get_indexdef(i.indexrelid,1,true) LIKE '(embedding::halfvec%'))
+      SELECT i.indisvalid AND i.indisready AND i.indislive AND i.indpred IS NULL AND i.indnatts=1 AND am.amname='hnsw' AND opc.opcname=?
+        AND ((?='hnsw_vector' AND pg_get_indexdef(i.indexrelid,1,true)='embedding') OR (?='hnsw_halfvec' AND pg_get_indexdef(i.indexrelid,1,true)=?))
       FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_am am ON am.oid=c.relam
       JOIN pg_opclass opc ON opc.oid=i.indclass[0]
       JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid=t.relnamespace
       WHERE n.nspname='dvp' AND t.relname=? AND c.relname=?
-      """,(rs,n)->rs.getBoolean(1),operator(x.metric(),x.strategy()),x.strategy(),x.strategy(),x.table(),x.table()+"_ann");
+      """,(rs,n)->rs.getBoolean(1),operator(x.metric(),x.strategy()),x.strategy(),x.strategy(),
+        "(embedding::halfvec("+x.dims()+"))",x.table(),x.table()+"_ann");
     return rows.isEmpty()?"pending":rows.getFirst()?"ready":"failed";
   }
   private void reconcile(JobRepository.Lease lease,Index x,Connection connection) throws SQLException {

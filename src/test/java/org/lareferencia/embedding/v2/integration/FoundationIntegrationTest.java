@@ -24,7 +24,7 @@ import org.springframework.test.context.DynamicPropertySource;
 @EnabledIfEnvironmentVariable(named="DVP_TEST_DB_URL",matches=".+")
 @SpringBootTest(properties={"spring.config.location=classpath:/application.properties","app.dvp.enabled=true",
     "app.dvp.read-connections=1","app.dvp.coordination-connections=1","app.dvp.lock-connections=1",
-    "app.dvp.connection-timeout-ms=300","app.dvp.inference-concurrency=1"})
+    "app.dvp.connection-timeout-ms=300","app.dvp.inference-concurrency=1","app.dvp.workers-enabled=false"})
 class FoundationIntegrationTest {
   @DynamicPropertySource static void database(DynamicPropertyRegistry r) {
     String url=TestDatabase.create();

@@ -25,7 +25,8 @@ import org.springframework.test.web.servlet.*;
 @EnabledIfEnvironmentVariable(named="DVP_TEST_DB_URL",matches=".+")
 @SpringBootTest(properties={"spring.config.location=classpath:/application.properties","app.dvp.enabled=true",
     "app.dvp.providers.first.type=OPENAI_COMPATIBLE","app.dvp.providers.first.endpoint=http://localhost:12345/v1/embeddings",
-    "app.dvp.providers.second.type=OLLAMA","app.dvp.providers.second.endpoint=http://localhost:12346/api/embed"})
+    "app.dvp.providers.second.type=OLLAMA","app.dvp.providers.second.endpoint=http://localhost:12346/api/embed",
+    "app.dvp.providers.test-provider.type=OPENAI_COMPATIBLE","app.dvp.providers.test-provider.endpoint=http://localhost:12347/v1/embeddings"})
 @AutoConfigureMockMvc
 class ProfilesIntegrationTest {
   private static final String PATH="/api/v2/embedding-profiles";
@@ -82,7 +83,7 @@ class ProfilesIntegrationTest {
     assertEquals("c0913a4fe16cc4651cf5f661d313b0dde72e51e197e8ca6bbf105bd9daffac26",json(result).path("fingerprint").asText());
   }
   @Test void validationPaginationAndImmutability() throws Exception {
-    assertTrue(registry.contains("local"));
+    assertTrue(registry.contains("test-provider"));
     create(UUID.randomUUID().toString(),request("missing-"+UUID.randomUUID(),"x","http","unknown","{\"version\":\"identity-v1\"}"),422);
     create(UUID.randomUUID().toString(),request("wrong-"+UUID.randomUUID(),"x","import_only","first","{\"version\":\"identity-v1\"}"),400);
     create(UUID.randomUUID().toString(),request("bad-"+UUID.randomUUID(),"x","http","first","{\"version\":\"unknown\"}"),400);

@@ -89,7 +89,7 @@ public class IndexationService {
         x.set("selection",mapper.readTree(rs.getString("selection")));x.set("chunking",mapper.readTree(rs.getString("chunking")));
         x.putObject("profile").put("id",rs.getObject("profile_id").toString()).put("model",rs.getString("model")).put("model_revision",rs.getString("model_revision")).put("dimensions",rs.getInt("dimensions")).put("execution_mode",rs.getString("execution_mode"));
         x.putObject("capabilities").put("exact",rs.getString("state").equals("ready")).put("approximate",rs.getString("state").equals("ready") && rs.getString("ann_state").equals("ready"));
-        ObjectNode counters=x.putObject("counters");long estimate=rs.getLong("vectors_estimated");
+        ObjectNode counters=x.putObject("counters").put("is_estimate",true);long estimate=rs.getLong("vectors_estimated");
         if(rs.wasNull())counters.putNull("vectors_estimated");else counters.put("vectors_estimated",estimate);
         var measured=rs.getTimestamp("measured_at");if(measured==null)counters.putNull("measured_at");else counters.put("measured_at",measured.toInstant().toString());
         return (JsonNode)x;}catch(java.io.IOException e){throw new IllegalStateException("Invalid index configuration");}},c,i).stream().findFirst()
