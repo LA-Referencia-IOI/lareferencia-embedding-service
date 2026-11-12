@@ -415,6 +415,8 @@ Current coverage includes:
 
 ## v2 Collections and upgrades
 
+For a consolidated guide to the platform, end-to-end workflow, API examples and operations, see [Platform Guide](docs/PLATFORM-GUIDE.md). For step-by-step API and import examples, see [Document-to-vector workflows](docs/WORKFLOWS.md).
+
 Set `DVP_ENABLED=true` to expose v2 endpoints. The tracked application configuration
 enables v2 by default; Docker Compose defaults it to disabled. V2 supports collections,
 documents, immutable profiles, index configurations, preparation, deferred generation
