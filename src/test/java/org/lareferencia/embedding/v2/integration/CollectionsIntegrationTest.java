@@ -120,7 +120,7 @@ class CollectionsIntegrationTest {
     }
   }
   @Test void openApiDescribesCollectionsAndIdempotency() throws Exception {
-    var schema=json(mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn());
+    var schema=json(mvc.perform(get("/api-docs")).andExpect(status().isOk()).andReturn());
     var post=schema.path("paths").path(PATH).path("post");
     assertFalse(post.isMissingNode());
     assertTrue(post.path("parameters").toString().contains("Idempotency-Key"));

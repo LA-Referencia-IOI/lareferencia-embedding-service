@@ -25,4 +25,23 @@ public class OpenApiConfig {
                                                                 .name("AGPL-3.0")
                                                                 .url("https://www.gnu.org/licenses/agpl-3.0.html")));
         }
+        /** Swagger UI uses this order when tagsSorter is not configured. */
+        @Bean
+        public org.springdoc.core.customizers.OpenApiCustomizer versionedTagOrder() {
+                return api -> {
+                        var tags = new java.util.LinkedHashMap<String, io.swagger.v3.oas.models.tags.Tag>();
+                        if (api.getTags() != null) api.getTags().forEach(tag -> tags.put(tag.getName(), tag));
+                        if (api.getPaths() != null) api.getPaths().values().forEach(path -> path.readOperations().forEach(operation -> {
+                                if (operation.getTags() != null) operation.getTags().forEach(name ->
+                                                tags.computeIfAbsent(name, key -> new io.swagger.v3.oas.models.tags.Tag().name(key)));
+                        }));
+                        api.setTags(new java.util.ArrayList<>(tags.values()));
+                        api.getTags().sort(java.util.Comparator
+                                        .comparingInt((io.swagger.v3.oas.models.tags.Tag tag) ->
+                                                        tag.getName().startsWith("v2 ") ? 0 :
+                                                        tag.getName().startsWith("v1 ") ? 1 : 2)
+                                        .thenComparing(io.swagger.v3.oas.models.tags.Tag::getName));
+                };
+        }
+
 }

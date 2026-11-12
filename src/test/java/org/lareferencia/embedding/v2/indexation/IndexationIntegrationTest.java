@@ -246,7 +246,7 @@ class IndexationIntegrationTest {
     assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM dvp."+IndexationService.table(i2),Integer.class));
   }
   @Test void openApiDocumentsIndexationRequestsAndPagination() throws Exception {
-    var result=mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn();
+    var result=mvc.perform(get("/api-docs")).andExpect(status().isOk()).andReturn();
     var paths=mapper.readTree(result.getResponse().getContentAsString()).path("paths");
     var create=paths.path("/api/v2/collections/{collection}/indexations").path("post");
     assertTrue(create.path("responses").has("202"));

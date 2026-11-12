@@ -50,4 +50,16 @@ class RequestFilterTest {
       assertTrue(pending.get(5,java.util.concurrent.TimeUnit.SECONDS));
     }
   }
+  @Test void requestLogIncludesIdWithoutSensitiveInputs() throws Exception {
+    var logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(V2RequestFilter.class);
+    var appender=new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();appender.start();logger.addAppender(appender);
+    try {
+      var config=new DvpProperties();config.setEnabled(true);var filter=new V2RequestFilter(config,new ObjectMapper());
+      var request=new MockHttpServletRequest("POST","/api/v2/collections/private-canary");request.setContent("secret-body-canary".getBytes(java.nio.charset.StandardCharsets.UTF_8));request.addHeader("Authorization","secret-header-canary");
+      var response=new MockHttpServletResponse();filter.doFilter(request,response,(r,s)->{});
+      String line=appender.list.getLast().getFormattedMessage();assertTrue(line.contains(response.getHeader("X-Request-Id")));
+      assertFalse(line.contains("private-canary"));assertFalse(line.contains("secret-body-canary"));assertFalse(line.contains("secret-header-canary"));
+    } finally {logger.detachAppender(appender);appender.stop();}
+  }
+
 }

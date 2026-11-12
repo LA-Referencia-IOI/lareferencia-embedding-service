@@ -120,7 +120,7 @@ class JobRuntimeIntegrationTest {
     mvc.perform(get("/api/v2/jobs").param("cursor","invalid")).andExpect(status().isBadRequest());
     mvc.perform(get("/api/v2/jobs").param("limit","1","2")).andExpect(status().isBadRequest());
     mvc.perform(get("/api/v2/jobs").param("unknown","x")).andExpect(status().isBadRequest());
-    var api=mapper.readTree(mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+    var api=mapper.readTree(mvc.perform(get("/api-docs")).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
     assertTrue(api.path("paths").path("/api/v2/jobs").has("get"));
   }
 

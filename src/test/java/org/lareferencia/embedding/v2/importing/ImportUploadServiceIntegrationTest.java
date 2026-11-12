@@ -31,6 +31,7 @@ class ImportUploadServiceIntegrationTest {
     r.add("app.dvp.file-root",()->root.toString());
   }
   @Autowired ImportUploadService upload;@Autowired DurableImportStore store;@Autowired ObjectMapper mapper;
+  @Autowired io.micrometer.core.instrument.MeterRegistry metrics;
   @Autowired org.lareferencia.embedding.v2.job.JobRepository jobs;@Autowired org.lareferencia.embedding.v2.job.JobHandlers handlers;
   @Autowired org.lareferencia.embedding.v2.job.JobService jobService;
   @Autowired ImportCleanup cleanup;
@@ -46,9 +47,11 @@ class ImportUploadServiceIntegrationTest {
     UUID collection=collection();String key=UUID.randomUUID().toString();byte[] contents="{\"schema_version\":\"1\"}\n".getBytes(StandardCharsets.UTF_8);
     long before;try(var paths=Files.list(root)){before=paths.filter(p->p.toString().endsWith(".data")).count();}
     var options=mapper.readTree("{\"format\":\"jsonl\",\"mode\":\"merge\"}");
+    var prior=metrics.find("dvp.import.registered.bytes").summary();double previousBytes=prior==null?0:prior.totalAmount();
     var first=upload.upload(collection,new ByteArrayInputStream(contents),options,key,new LinkedMultiValueMap<>());
     var replay=upload.upload(collection,new ByteArrayInputStream(contents),options,key,new LinkedMultiValueMap<>());
     assertEquals(202,first.status());assertEquals(first.body(),replay.body());assertEquals(first.headers(),replay.headers());
+    assertEquals(previousBytes+contents.length,metrics.find("dvp.import.registered.bytes").summary().totalAmount());
     assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.jobs WHERE id=?",Integer.class,first.jobId()));
     String fileKey=jdbc.queryForObject("SELECT storage_key FROM dvp.import_files WHERE job_id=?",String.class,first.jobId());
     assertArrayEquals(contents,store.open(fileKey).readAllBytes());
@@ -136,7 +139,7 @@ class ImportUploadServiceIntegrationTest {
     assertEquals(1L,jdbc.queryForObject("SELECT revision FROM dvp.documents WHERE collection_id=? AND external_id='other'",Long.class,c));
   }
   @Test void openApiShowsTheMultipartImportRoute() throws Exception {
-    var response=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/v3/api-docs"))
+    var response=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api-docs"))
         .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andReturn();
     var operation=mapper.readTree(response.getResponse().getContentAsString()).path("paths").path("/api/v2/collections/{collection}/imports").path("post");
     assertTrue(operation.path("responses").has("202"));

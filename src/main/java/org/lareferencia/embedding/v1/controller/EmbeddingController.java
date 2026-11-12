@@ -19,7 +19,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/v1/embeddings")
 @RequiredArgsConstructor
-@Tag(name = "Embeddings", description = "Generate embeddings with model and dimensions aware persistent caching")
+@Tag(name = "v1 Embeddings", description = "Generate embeddings with model and dimensions aware persistent caching")
 public class EmbeddingController {
 
     private final EmbeddingService embeddingService;

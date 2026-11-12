@@ -14,10 +14,11 @@ import org.springframework.test.context.*;
 
 @EnabledIfEnvironmentVariable(named="DVP_TEST_DB_URL",matches=".+")
 @org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
-@SpringBootTest(properties={"spring.config.location=classpath:/application.properties","app.dvp.enabled=true","app.dvp.workers-enabled=false"})
+@SpringBootTest(properties={"spring.config.location=classpath:/application.properties","app.dvp.enabled=true","app.dvp.workers-enabled=false","app.dvp.import-enabled=true"})
 class SearchIntegrationTest {
   @DynamicPropertySource static void database(DynamicPropertyRegistry r){String url=TestDatabase.create();r.add("spring.datasource.url",()->url);r.add("spring.datasource.username",()->"postgres");r.add("spring.datasource.password",()->"");}
   @Autowired SearchService service;@Autowired ObjectMapper mapper;
+  @Autowired io.micrometer.core.instrument.MeterRegistry metrics;
   @Autowired org.lareferencia.embedding.v2.config.DvpProperties props;
   @Autowired org.springframework.test.web.servlet.MockMvc mvc;
   @org.springframework.test.context.bean.override.mockito.MockitoBean org.lareferencia.embedding.v2.profile.ProviderRegistry providers;
@@ -107,6 +108,58 @@ class SearchIntegrationTest {
     try {var failure=assertThrows(V2Exception.class,()->search(f,"{\"query\":{\"vector\":[1,0]},\"mode\":\"exact\"}"));assertEquals(503,failure.status());assertEquals("search_timeout",failure.code());}
     finally {props.setExactTimeoutSeconds(previous);}
     Fixture fast=fixture("l2","none");UUID fastDoc=document(fast,"fast");unit(fast,fastDoc,0,"[1,0]");assertEquals(1,((List<?>)search(fast,"{\"query\":{\"vector\":[1,0]},\"mode\":\"exact\"}").get("results")).size());
+  }
+
+  @Test void searchTelemetryUsesBoundedLabels() throws Exception {
+    Fixture f=fixture("l2","hnsw_vector");UUID d=document(f,"sensitive-document-value");unit(f,d,0,"[1,0]");
+    double before=metrics.find("dvp.search.duration").tag("mode","approximate").tag("outcome","success").timer()==null?0:metrics.find("dvp.search.duration").tag("mode","approximate").tag("outcome","success").timer().count();
+    search(f,"{\"query\":{\"vector\":[1,0]},\"top_n\":2}");
+    assertEquals(before+1,metrics.find("dvp.search.duration").tag("mode","approximate").tag("outcome","success").timer().count());
+    assertNotNull(metrics.find("dvp.search.candidates").tag("mode","approximate").summary());assertNotNull(metrics.find("dvp.search.shortfalls").tag("mode","approximate").counter());
+    for(var meter:metrics.getMeters())if(meter.getId().getName().startsWith("dvp.search"))assertFalse(meter.getId().getTags().toString().contains("sensitive-document-value"));
+  }
+
+  @Test void apiErrorMetricsUseAllowlistedCodes() throws Exception {
+    Fixture f=fixture("cosine","none");var before=metrics.find("dvp.api.errors").tag("code","invalid_vector").counter();double count=before==null?0:before.count();
+    mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v2/collections/"+f.collection()+"/indexations/"+f.index()+"/search").contentType("application/json").content("{\"query\":{\"vector\":[0,0]},\"mode\":\"exact\"}"))
+      .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnprocessableEntity());
+    assertEquals(count+1,metrics.find("dvp.api.errors").tag("code","invalid_vector").counter().count());
+  }
+
+  @Test void openApiAdvertisesDeliveredV2Routes() throws Exception {
+    var response=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api-docs")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andReturn().getResponse().getContentAsString();
+    var paths=mapper.readTree(response).path("paths");
+    var expected=Map.ofEntries(
+      Map.entry("/api/v2/collections","post"),Map.entry("/api/v2/collections/{collection}/documents/by-external-id","patch"),
+      Map.entry("/api/v2/embedding-profiles","post"),Map.entry("/api/v2/collections/{collection}/indexations","post"),
+      Map.entry("/api/v2/collections/{collection}/indexations/{id}/maintenance-jobs","post"),
+      Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/preparation-jobs","post"),
+      Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/generation-jobs","post"),
+      Map.entry("/api/v2/collections/{collection}/imports","post"),Map.entry("/api/v2/jobs/{id}/retries","post"),
+      Map.entry("/api/v2/collections/{collection}/documents/{document}/vectors","get"),
+      Map.entry("/api/v2/collections/{collection}/document-vectors","get"),
+      Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/documents/{document}/vectors","get"),
+      Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/document-vectors","get"),
+      Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/search","post"));
+    expected.forEach((path,method)->assertTrue(paths.path(path).has(method),"OpenAPI missing "+method+" "+path));
+  }
+
+  @Test void openApiGroupsVersionsInSwaggerOrderAndUsesNewDocumentUrl() throws Exception {
+    var body=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api-docs"))
+      .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andReturn().getResponse().getContentAsString();
+    var api=mapper.readTree(body);var tags=new ArrayList<String>();api.path("tags").forEach(tag->tags.add(tag.path("name").asText()));
+    assertTrue(tags.contains("v2 Indexations"));assertTrue(tags.contains("v1 Stores"));
+    boolean sawV1=false;for(String tag:tags) {assertTrue(tag.startsWith("v1 ") || tag.startsWith("v2 "),tag);if(tag.startsWith("v1 "))sawV1=true;else assertFalse(sawV1,"v2 tag appeared after v1");}assertTrue(sawV1);
+    api.path("paths").fields().forEachRemaining(path->{String prefix=path.getKey().startsWith("/api/v2/")?"v2 ":path.getKey().startsWith("/api/v1/")?"v1 ":null;
+      if(prefix!=null) path.getValue().fields().forEachRemaining(operation->{if(operation.getValue().isObject() && operation.getValue().has("operationId")) {
+        var operationTags=operation.getValue().path("tags");assertTrue(operationTags.isArray() && !operationTags.isEmpty(),path.getKey());operationTags.forEach(tag->assertTrue(tag.asText().startsWith(prefix),path.getKey()));
+      }});
+    });
+    var config=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api-docs/swagger-config"))
+      .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andReturn().getResponse().getContentAsString();
+    assertEquals("/api-docs",mapper.readTree(config).path("url").asText());
+    mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/v3/api-docs"))
+      .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNotFound());
   }
 
 }

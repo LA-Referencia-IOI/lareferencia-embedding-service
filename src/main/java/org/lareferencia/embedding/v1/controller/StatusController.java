@@ -13,7 +13,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/v1/status")
 @RequiredArgsConstructor
-@Tag(name = "Status", description = "Inspect service, host, and database resource usage")
+@Tag(name = "v1 Status", description = "Inspect service, host, and database resource usage")
 public class StatusController {
 
   private final StatusService statusService;

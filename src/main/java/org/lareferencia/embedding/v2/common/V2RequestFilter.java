@@ -14,6 +14,7 @@ import org.lareferencia.embedding.v2.config.DvpProperties;
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 10)
 public class V2RequestFilter extends OncePerRequestFilter {
+  private static final org.slf4j.Logger log=org.slf4j.LoggerFactory.getLogger(V2RequestFilter.class);
   public static final String REQUEST_ID = "dvp.request_id";
   private final DvpProperties properties;
   private final ObjectMapper mapper;
@@ -62,10 +63,15 @@ public class V2RequestFilter extends OncePerRequestFilter {
         };
       }
     };
-    try {chain.doFilter(wrapped,response);} finally {if(upload)uploads.release();}
+    boolean completed=false;
+    try {chain.doFilter(wrapped,response);completed=true;} finally {
+      if(upload)uploads.release();
+      log.info("v2 request_id={} status={}",id,completed?Integer.toString(response.getStatus()):"unhandled");
+    }
   }
   private void error(HttpServletResponse response,int status,String code,String message,String id) throws IOException {
     response.setStatus(status); response.setContentType("application/json"); response.setCharacterEncoding("UTF-8");
     mapper.writeValue(response.getOutputStream(),V2Error.of(status,code,message,id));
+    log.info("v2 request_id={} status={}",id,status);
   }
 }

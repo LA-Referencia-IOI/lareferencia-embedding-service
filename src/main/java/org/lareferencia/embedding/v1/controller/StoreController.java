@@ -24,7 +24,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/v1/stores")
 @RequiredArgsConstructor
-@Tag(name = "Stores", description = "Manage embedding stores and their associated embedding models")
+@Tag(name = "v1 Stores", description = "Manage embedding stores and their associated embedding models")
 public class StoreController {
 
   private final StoreService storeService;

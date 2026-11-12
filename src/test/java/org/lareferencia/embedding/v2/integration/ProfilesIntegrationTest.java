@@ -107,7 +107,7 @@ class ProfilesIntegrationTest {
     assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.embedding_profiles WHERE model=?",Integer.class,model));
   }
   @Test void openApiDocumentsProfileRoutesAndRequestSchema() throws Exception {
-    JsonNode api=json(mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn());
+    JsonNode api=json(mvc.perform(get("/api-docs")).andExpect(status().isOk()).andReturn());
     assertTrue(api.path("paths").path(PATH).has("post"));
     assertTrue(api.path("paths").path(PATH).has("get"));
     assertTrue(api.path("components").path("schemas").path("ProfileRequest").path("properties").has("model_revision"));

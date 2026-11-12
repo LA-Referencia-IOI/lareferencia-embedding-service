@@ -148,7 +148,7 @@ V2 errors contain `timestamp`, `status`, `code`, `message`, `request_id`, `detai
 `X-Request-Id` matches the generated identifier. Parse/database diagnostics do not
 return bodies, SQL, provider keys or private exception text. A request above the byte
 limit is 413, including when its declared size is absent; database/pool unavailability
-is 503. V1 retains its separate response/error shapes. Swagger/OpenAPI at `/v3/api-docs`
+is 503. V1 retains its separate response/error shapes. Swagger/OpenAPI at `/api-docs`
 and `/swagger-ui.html` documents the enabled routes; disabled v2 has no Collections
 controller. Document endpoints use the same `If-Match` helpers; see the
 [Phase 4 document contract](phase-4-documents.md).

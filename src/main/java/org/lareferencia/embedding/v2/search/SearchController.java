@@ -7,6 +7,7 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
+@io.swagger.v3.oas.annotations.tags.Tag(name="v2 Search")
 @RestController
 @RequestMapping("/api/v2/collections/{collection}/indexations/{indexation}/search")
 @ConditionalOnExpression("${app.dvp.enabled:false} && !'${app.dvp.role:api}'.equalsIgnoreCase('worker')")

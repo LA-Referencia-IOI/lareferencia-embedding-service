@@ -17,10 +17,10 @@ import org.springframework.util.MultiValueMap;
 @ConditionalOnProperty(name="app.dvp.enabled",havingValue="true")
 public class ImportUploadService {
   private final DurableImportStore files;private final IdempotencyService idempotency;private final CanonicalJson canonical;
-  private final JobRepository jobs;private final JdbcTemplate jdbc;private final ObjectMapper mapper;
+  private final JobRepository jobs;private final JdbcTemplate jdbc;private final ObjectMapper mapper;private final io.micrometer.core.instrument.MeterRegistry metrics;
   public ImportUploadService(DurableImportStore files,IdempotencyService idempotency,CanonicalJson canonical,
-      JobRepository jobs,@Qualifier("jdbcTemplate") JdbcTemplate jdbc,ObjectMapper mapper) {
-    this.files=files;this.idempotency=idempotency;this.canonical=canonical;this.jobs=jobs;this.jdbc=jdbc;this.mapper=mapper;
+      JobRepository jobs,@Qualifier("jdbcTemplate") JdbcTemplate jdbc,ObjectMapper mapper,io.micrometer.core.instrument.MeterRegistry metrics) {
+    this.files=files;this.idempotency=idempotency;this.canonical=canonical;this.jobs=jobs;this.jdbc=jdbc;this.mapper=mapper;this.metrics=metrics;
   }
   public IdempotencyService.Result upload(UUID collection,InputStream input,JsonNode options,String key,MultiValueMap<String,String> query) {
     Objects.requireNonNull(collection);Objects.requireNonNull(input);
@@ -50,6 +50,7 @@ public class ImportUploadService {
     // Delete only after a successful replay proves that this newly uploaded file is not referenced.
     // On uncertain database failure retain it for reconciliation rather than risk deleting committed data.
       if(!proposedJob.equals(result.jobId())) files.discardRedundant(stored);
+      else metrics.summary("dvp.import.registered.bytes").record(stored.byteSize());
       return result;
     }
   }

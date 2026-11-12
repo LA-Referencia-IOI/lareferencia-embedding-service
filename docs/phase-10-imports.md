@@ -1,6 +1,6 @@
 # Phase 10: streaming document and vector imports
 
-Enable v2 and explicitly enable imports with `DVP_IMPORT_ENABLED=true` on the API and worker processes. Run at least one process with `DVP_WORKERS_ENABLED=true` and role `WORKER` or `ALL`. Imports are disabled by default. Set `DVP_IMPORT_FILE_ROOT` to the same durable directory on all API and worker replicas. The volume must support atomic same-filesystem rename, directory fsync and cross-process advisory file locks. Verify these guarantees on the actual shared filesystem before deployment. The Compose `import-data` volume is local to its Docker host; use a shared volume for multi-host deployments.
+Enable v2 and explicitly enable imports with `DVP_IMPORT_ENABLED=true` on the API and worker processes. Run at least one process with `DVP_WORKERS_ENABLED=true` and role `WORKER` or `ALL`. The tracked standalone configuration currently defaults imports to enabled; Compose and the example configuration default them to disabled. Set `DVP_IMPORT_ENABLED` explicitly for each process. Set `DVP_IMPORT_FILE_ROOT` to the same durable directory on all API and worker replicas. The volume must support atomic same-filesystem rename, directory fsync and cross-process advisory file locks. Verify these guarantees on the actual shared filesystem before deployment. The Compose `import-data` volume is local to its Docker host; use a shared volume for multi-host deployments.
 
 Submit uncompressed UTF-8 JSON or JSONL using multipart form data:
 

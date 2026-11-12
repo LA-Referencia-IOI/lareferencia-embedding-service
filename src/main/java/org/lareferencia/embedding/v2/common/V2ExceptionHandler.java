@@ -14,8 +14,13 @@ import org.springframework.web.bind.MissingRequestHeaderException;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(basePackages="org.lareferencia.embedding.v2")
 public class V2ExceptionHandler {
+  private io.micrometer.core.instrument.MeterRegistry metrics;
+  private static final java.util.Set<String> OBSERVED_CODES=java.util.Set.of("invalid_request","not_found","method_not_allowed","unsupported_media_type","database_unavailable","internal_error","search_timeout","search_busy","approximate_search_unavailable","indexation_unavailable","invalid_vector","halfvec_not_representable","provider_unavailable","provider_timeout","provider_rejected","invalid_provider_response","inference_busy","file_too_large","import_file_unavailable","import_file_corrupt","import_storage_unavailable","idempotency_conflict","idempotency_in_progress");
+  @org.springframework.beans.factory.annotation.Autowired(required=false)
+  void setMetrics(io.micrometer.core.instrument.MeterRegistry metrics) {this.metrics=metrics;}
   @ExceptionHandler(V2Exception.class)
   ResponseEntity<V2Error> domain(V2Exception e, HttpServletRequest request) {
+    if(metrics!=null)metrics.counter("dvp.api.errors","code",OBSERVED_CODES.contains(e.code())?e.code():"other").increment();
     var builder = ResponseEntity.status(e.status());
     if (e.status()==429 || e.code().equals("idempotency_in_progress")) builder.header("Retry-After","1");
     return builder.body(V2Error.of(e.status(),e.code(),e.getMessage(),requestId(request)));

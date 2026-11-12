@@ -6,6 +6,7 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
+@io.swagger.v3.oas.annotations.tags.Tag(name="v2 Vector Retrieval")
 @RestController
 @RequestMapping("/api/v2/collections/{collection}")
 @ConditionalOnProperty(name="app.dvp.enabled", havingValue="true")

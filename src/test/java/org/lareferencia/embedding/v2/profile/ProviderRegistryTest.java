@@ -13,6 +13,7 @@ import org.junit.jupiter.api.*;
 import org.lareferencia.embedding.v2.common.V2Exception;
 
 class ProviderRegistryTest {
+  private io.micrometer.core.instrument.simple.SimpleMeterRegistry meters;
   private HttpServer server;
   private ThreadPoolExecutor executor;
   private ProviderRegistry registry;
@@ -41,7 +42,7 @@ class ProviderRegistryTest {
       provider.setRequestTimeout(Duration.ofSeconds(1));provider.setBatchSize(2);map.put(name,provider);
     }
     p.setProviders(map);executor=new ThreadPoolExecutor(2,2,0,TimeUnit.SECONDS,new SynchronousQueue<>());
-    registry=new ProviderRegistry(p,executor,new ObjectMapper());
+    meters=new io.micrometer.core.instrument.simple.SimpleMeterRegistry();registry=new ProviderRegistry(p,executor,new ObjectMapper(),meters);
   }
   @Test void preservesSanitizedRateLimitRetryInformation() {
     var failure=assertThrows(ProviderRegistry.ProviderFailure.class,()->registry.embed(profile("limited","http"),List.of("a")));
@@ -56,6 +57,8 @@ class ProviderRegistryTest {
     var two=registry.embed(profile("second","http"),List.of("a","b"));
     assertArrayEquals(new float[]{5,6},two.get(0));assertArrayEquals(new float[]{7,8},two.get(1));
     assertEquals(1,first.get());assertEquals(1,second.get());
+    assertEquals(2,meters.find("dvp.provider.duration").tag("outcome","success").timer().count());
+    assertFalse(meters.getMeters().toString().contains("first"));
   }
   @Test void rejectsBadResponsesImportOnlyAndOversizedBatches() {
     assertEquals("invalid_provider_response",assertThrows(V2Exception.class,()->registry.embed(profile("invalid","http"),List.of("a","b"))).code());

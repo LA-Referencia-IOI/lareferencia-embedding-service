@@ -248,7 +248,7 @@ class DocumentsIntegrationTest {
     assertFalse(output.getAll().contains(marker),"Framework logs must not contain source or metadata values");
   }
   @Test void openApiDescribesDocumentRoutesAndSchemas() throws Exception {
-    var schema=json(mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn());
+    var schema=json(mvc.perform(get("/api-docs")).andExpect(status().isOk()).andReturn());
     var path=schema.path("paths").path("/api/v2/collections/{collection}/documents/by-external-id");
     assertTrue(path.has("patch"));assertTrue(path.has("put"));assertTrue(path.has("get"));
     assertTrue(schema.path("paths").path("/api/v2/collections/{collection}/documents/{id}").has("delete"));

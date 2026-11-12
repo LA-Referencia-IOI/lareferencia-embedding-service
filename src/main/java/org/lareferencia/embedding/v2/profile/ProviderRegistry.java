@@ -21,8 +21,9 @@ public class ProviderRegistry {
   private final Map<String,Connection> providers;
   private final ThreadPoolExecutor executor;
   private final ObjectMapper mapper;
-  public ProviderRegistry(ProviderProperties properties,ThreadPoolExecutor inferenceExecutor,ObjectMapper mapper) {
-    this.executor=inferenceExecutor;this.mapper=mapper;
+  private final io.micrometer.core.instrument.MeterRegistry metrics;
+  public ProviderRegistry(ProviderProperties properties,ThreadPoolExecutor inferenceExecutor,ObjectMapper mapper,io.micrometer.core.instrument.MeterRegistry metrics) {
+    this.executor=inferenceExecutor;this.mapper=mapper;this.metrics=metrics;
     var configured=new HashMap<String,Connection>();
     properties.getProviders().forEach((name,p)->{
       try {
@@ -41,6 +42,7 @@ public class ProviderRegistry {
     });
     providers=Map.copyOf(configured);
   }
+  public int configuredCount() { return providers.size(); }
   public boolean contains(String reference) { return reference!=null && providers.containsKey(reference); }
   public int batchSize(ProfileResource profile) {
     Connection connection=providers.get(profile.providerRef());
@@ -59,6 +61,12 @@ public class ProviderRegistry {
 
   /** Call only after finishing database transactions. Input is already prepared and bounded by the caller. */
   public List<float[]> embed(ProfileResource profile,List<String> inputs) {
+    var sample=io.micrometer.core.instrument.Timer.start(metrics);String outcome="success";
+    try { return embedInternal(profile,inputs); }
+    catch(RuntimeException e) { outcome="error";throw e; }
+    finally { sample.stop(metrics.timer("dvp.provider.duration","outcome",outcome)); }
+  }
+  private List<float[]> embedInternal(ProfileResource profile,List<String> inputs) {
     if(!"http".equals(profile.executionMode())) throw new V2Exception(409,"profile_not_executable","Profile has no inference capability");
     Connection c=providers.get(profile.providerRef());
     if(c==null) throw new V2Exception(503,"provider_unavailable","Provider configuration unavailable");

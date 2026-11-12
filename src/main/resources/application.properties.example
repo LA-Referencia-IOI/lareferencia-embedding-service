@@ -39,3 +39,6 @@ app.dvp.lease-seconds=${DVP_LEASE_SECONDS:120}
 app.dvp.heartbeat-seconds=${DVP_HEARTBEAT_SECONDS:20}
 
 
+
+# Swagger UI loads the OpenAPI document from this path.
+springdoc.api-docs.path=/api-docs

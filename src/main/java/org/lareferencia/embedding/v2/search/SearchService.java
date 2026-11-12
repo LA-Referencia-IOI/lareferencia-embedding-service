@@ -20,11 +20,12 @@ public class SearchService {
   private final JdbcTemplate jdbc;private final TransactionTemplate reads;private final DvpProperties props;
   private final ProfileRepository profiles;private final ProfilePreparation preparation;private final ProviderRegistry providers;
   private final ImportVectorValidator validator;private final ObjectMapper mapper;private final Semaphore exactSlots,approxSlots;
+  private final io.micrometer.core.instrument.MeterRegistry metrics;
   record Config(UUID id,UUID profile,String table,String metric,String strategy,String state,String annState) {}
   record Hit(UUID document,UUID unit,String external,String textKey,long sourceRevision,double distance,String text,String metadata) {}
   public SearchService(@Qualifier("readJdbc") JdbcTemplate jdbc,@Qualifier("readTransactions") TransactionTemplate reads,DvpProperties props,
-      ProfileRepository profiles,ProfilePreparation preparation,ProviderRegistry providers,ImportVectorValidator validator,ObjectMapper mapper) {
-    this.jdbc=jdbc;this.reads=reads;this.props=props;this.profiles=profiles;this.preparation=preparation;this.providers=providers;this.validator=validator;this.mapper=mapper;
+      ProfileRepository profiles,ProfilePreparation preparation,ProviderRegistry providers,ImportVectorValidator validator,ObjectMapper mapper,io.micrometer.core.instrument.MeterRegistry metrics) {
+    this.jdbc=jdbc;this.reads=reads;this.props=props;this.profiles=profiles;this.preparation=preparation;this.providers=providers;this.validator=validator;this.mapper=mapper;this.metrics=metrics;
     exactSlots=new Semaphore(props.getExactConcurrency());approxSlots=new Semaphore(props.getApproximateConcurrency());
   }
   public Map<String,Object> search(String collection,String indexation,JsonNode request) {
@@ -35,7 +36,8 @@ public class SearchService {
     if(top<1||top>100)throw V2Exception.badRequest("Invalid top_n");
     String unit=option(request,"result_unit","document",Set.of("document","unit"));String mode=option(request,"mode","approximate",Set.of("exact","approximate"));
     Set<String> includes=new HashSet<>();if(request.has("include")){var array=request.get("include");if(!array.isArray())throw V2Exception.badRequest("Invalid include");for(var n:array)if(!n.isTextual()||!Set.of("texts","metadata").contains(n.textValue())||!includes.add(n.textValue()))throw V2Exception.badRequest("Invalid include");}
-    Semaphore slots=mode.equals("exact")?exactSlots:approxSlots;if(!slots.tryAcquire())throw new V2Exception(429,"search_busy","Search capacity exhausted");
+    Semaphore slots=mode.equals("exact")?exactSlots:approxSlots;if(!slots.tryAcquire()){metrics.counter("dvp.search.rejected","mode",mode).increment();throw new V2Exception(429,"search_busy","Search capacity exhausted");}
+    var sample=io.micrometer.core.instrument.Timer.start(metrics);String outcome="success";
     try {
       Config config=config(c,i);check(config,mode);ProfileResource profile=profiles.find(config.profile()).orElseThrow(()->new V2Exception(503,"database_unavailable","Profile unavailable"));
       float[] vector;
@@ -49,7 +51,7 @@ public class SearchService {
       String value=Arrays.toString(vector);int requested=top;long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(mode.equals("exact")?props.getExactTimeoutSeconds():props.getApproximateTimeoutSeconds());
       try {return reads.execute(tx->{Config current=config(c,i);check(current,mode);return run(c,current,value,requested,unit,mode,includes,deadline);});}
       catch(DataAccessException | org.springframework.transaction.TransactionTimedOutException e) {if(timeout(e))throw new V2Exception(503,"search_timeout","Search timed out");throw e;}
-    } finally {slots.release();}
+    } catch(RuntimeException e) {outcome="error";throw e;} finally {sample.stop(metrics.timer("dvp.search.duration","mode",mode,"outcome",outcome));slots.release();}
   }
   private Config config(UUID collection,UUID id) {
     var found=jdbc.query("SELECT id,profile_id,vector_table,metric,ann_strategy,state,ann_state FROM dvp.indexations WHERE collection_id=? AND id=?",(rs,n)->new Config(rs.getObject(1,UUID.class),rs.getObject(2,UUID.class),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7)),collection,id);
@@ -77,7 +79,7 @@ public class SearchService {
         String candidate=c.strategy().equals("hnsw_halfvec")?"(v.embedding::halfvec("+dimensions(vector)+")) "+op+" (?::vector)::halfvec("+dimensions(vector)+")":"v.embedding "+op+" ?::vector";
         String sql="WITH candidates AS MATERIALIZED (SELECT v.unit_id,v.document_id,v.source_text_id,v.source_revision,v.indexation_id,v.embedding FROM dvp."+c.table()+" v ORDER BY "+candidate+" LIMIT ?) SELECT v.document_id,v.unit_id,d.external_id,s.text_key,v.source_revision,(v.embedding "+op+" ?::vector) distance,"+"NULL::text,NULL::text"+" FROM candidates v JOIN dvp.vector_units u ON u.id=v.unit_id AND u.document_id=v.document_id AND u.source_text_id=v.source_text_id AND u.source_revision=v.source_revision AND u.indexation_id=v.indexation_id JOIN dvp.source_texts s ON s.id=u.source_text_id AND s.document_id=u.document_id AND s.revision=u.source_revision JOIN dvp.documents d ON d.id=u.document_id AND d.collection_id=u.collection_id WHERE u.indexation_id=? AND u.collection_id=?";
         for(Hit h:jdbc.query(sql,(rs,n)->hit(rs),vector,budget,vector,c.id(),collection))accumulated.put(h.unit(),h);
-        hits=rank(accumulated.values(),unit,top);if(hits.size()>=top||budget>=10000)break;budget=Math.min(10000,budget*2);
+        hits=rank(accumulated.values(),unit,top);if(hits.size()>=top||budget>=10000){metrics.summary("dvp.search.candidates","mode","approximate").record(accumulated.size());break;}budget=Math.min(10000,budget*2);
       }
     }
     List<Map<String,Object>> results=new ArrayList<>();for(Hit h:hits){Map<String,Object> row=new LinkedHashMap<>();row.put("document_id",h.document());row.put("external_id",h.external());row.put("unit_id",h.unit());row.put("text_id",h.textKey());row.put("source_revision",h.sourceRevision());row.put("distance",h.distance());String text=h.text(),metadata=h.metadata();
@@ -87,6 +89,7 @@ public class SearchService {
         text=projection[0];metadata=projection[1];
       }
       if(includes.contains("texts"))row.put("text",text);if(includes.contains("metadata"))row.put("metadata",json(metadata));results.add(row);}
+    if(results.size()<top)metrics.counter("dvp.search.shortfalls","mode",mode).increment();
     Map<String,Object> response=new LinkedHashMap<>();response.put("indexation_id",c.id());response.put("profile_id",c.profile());response.put("metric",c.metric());response.put("mode",mode);response.put("result_unit",unit);response.put("requested",top);response.put("returned",results.size());response.put("shortfall_reason",results.size()<top?(mode.equals("exact")?"exhausted":"candidate_limit"):null);response.put("recall_guaranteed",mode.equals("exact"));response.put("results",results);return response;
   }
   private static List<Hit> rank(Collection<Hit> hits,String unit,int limit) {var sorted=hits.stream().sorted(Comparator.comparingDouble(Hit::distance).thenComparing(h->h.document().toString()).thenComparing(h->h.unit().toString())).toList();if(unit.equals("unit"))return sorted.stream().limit(limit).toList();Set<UUID> seen=new HashSet<>();return sorted.stream().filter(h->seen.add(h.document())).limit(limit).toList();}

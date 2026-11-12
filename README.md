@@ -142,10 +142,13 @@ java -jar target/lareferencia-embedding-service-0.0.1-SNAPSHOT.jar
 Swagger UI is available when the service is running:
 
 ```text
-http://localhost:8989/swagger-ui.html
+http://localhost:8989/swagger-ui/index.html
+http://localhost:8989/api-docs
 ```
 
 The active default port is `8989`; override it with `SERVER_PORT` if needed.
+The OpenAPI JSON endpoint is `/api-docs`; `/v3/api-docs` is no longer served.
+Swagger UI groups v2 operations before v1 operations.
 
 ### Create a Store
 
@@ -415,10 +418,12 @@ Current coverage includes:
 Set `DVP_ENABLED=true` to expose v2 endpoints. The tracked application configuration
 enables v2 by default; Docker Compose defaults it to disabled. V2 supports collections,
 documents, immutable profiles, index configurations, preparation, deferred generation
-and opt-in imports. Vector retrieval and search remain later phases. See [Phase 4 documents](docs/phase-4-documents.md),
+imports, vector retrieval, and exact and approximate search. See [Phase 4 documents](docs/phase-4-documents.md),
 [Phase 5 profiles](docs/phase-5-profiles.md), [Phase 8 preparation](docs/phase-8-preparation.md),
-[Phase 9 generation](docs/phase-9-generation.md), and [Phase 10 imports](docs/phase-10-imports.md)
-for usage, limits, compatibility and rollback.
+[Phase 9 generation](docs/phase-9-generation.md), [Phase 10 imports](docs/phase-10-imports.md),
+[Phase 11 retrieval](docs/phase-11-vector-retrieval.md), and [Phases 12–13 search](docs/phases-12-13-search.md)
+for usage, limits, compatibility and rollback. The [operations runbook](docs/phase-14-operations.md)
+contains readiness, backup and recovery guidance and the [synthetic capacity report](docs/phase-14-capacity.md).
 
 Creating a collection requires an `Idempotency-Key` header:
 
