@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.*;
 import org.lareferencia.embedding.v2.common.*;
+import org.lareferencia.embedding.v2.importing.ImportFileRepository;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
@@ -18,10 +19,11 @@ public class JobService {
   private final JobRepository jobs;private final JobHandlers handlers;private final IdempotencyService idempotency;
   private final CanonicalJson canonical;private final CursorCodec cursors;private final ObjectMapper mapper;
   private final TransactionTemplate reads;
+  private final ImportFileRepository importFiles;
   public JobService(JobRepository jobs,JobHandlers handlers,IdempotencyService idempotency,CanonicalJson canonical,
-      CursorCodec cursors,ObjectMapper mapper,@Qualifier("readTransactions") TransactionTemplate reads) {
+      CursorCodec cursors,ObjectMapper mapper,@Qualifier("readTransactions") TransactionTemplate reads,ImportFileRepository importFiles) {
     this.jobs=jobs;this.handlers=handlers;this.idempotency=idempotency;this.canonical=canonical;
-    this.cursors=cursors;this.mapper=mapper;this.reads=reads;
+    this.cursors=cursors;this.mapper=mapper;this.reads=reads;this.importFiles=importFiles;
   }
   /** Create in the same idempotent transaction as its response; only implemented handlers may be queued. */
   public IdempotencyService.Result create(UUID collectionId,UUID indexationId,String kind,JsonNode parameters,
@@ -78,6 +80,7 @@ public class JobService {
       requireHandler(parent.kind());
       if("import".equals(parent.kind()) && "file_correction_required".equals(parent.errorCode()))
         throw new V2Exception(409,"file_correction_required","Correct and upload the file again");
+      if("import".equals(parent.kind())) importFiles.requireRetainedForRetry(parentId);
       if(jobs.errors(parent.id(),null,1).isEmpty())
         throw new V2Exception(409,"no_retryable_failures","Job has no failed items to retry");
       var child=jobs.insert(UUID.randomUUID(),parent.collectionId(),parent.indexationId(),parent.id(),

@@ -50,6 +50,17 @@ public class DocumentService {
     return atomic(method+" "+path,key,hash,action);
   }
 
+  /** Apply an import record within its caller's fenced write transaction. */
+  public IdempotencyService.Result upsertInTransaction(UUID collectionId,String externalId,DocumentWriteRequest request,
+      boolean replace,Long expectedRevision) {
+    if(!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+        || org.springframework.transaction.support.TransactionSynchronizationManager.isCurrentTransactionReadOnly())
+      throw new IllegalStateException("An active write transaction is required");
+    validation.externalId(externalId);validation.write(request,replace);
+    if(expectedRevision!=null && expectedRevision<1) throw V2Exception.badRequest("expected_revision must be positive");
+    return upsert(collectionId,externalId,request,replace,expectedRevision);
+  }
+
   private IdempotencyService.Result upsert(UUID collectionId,String externalId,DocumentWriteRequest request,
       boolean replace,Long expected) {
     requireCollection(collectionId,true);

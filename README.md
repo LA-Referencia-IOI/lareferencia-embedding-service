@@ -412,12 +412,13 @@ Current coverage includes:
 
 ## v2 Collections and upgrades
 
-Set `DVP_ENABLED=true` to expose `/api/v2/collections`. V2 is disabled by default;
-this release implements collection create/list/get and document/source-text
-lifecycle operations and immutable embedding profiles. Indexations, jobs, imports
-and search are planned in later phases. See [Phase 4 documents](docs/phase-4-documents.md)
-for document usage and [Phase 5 profiles](docs/phase-5-profiles.md) for provider
-configuration, fingerprinting, capacity limits and rollback.
+Set `DVP_ENABLED=true` to expose v2 endpoints. The tracked application configuration
+enables v2 by default; Docker Compose defaults it to disabled. V2 supports collections,
+documents, immutable profiles, index configurations, preparation, deferred generation
+and opt-in imports. Vector retrieval and search remain later phases. See [Phase 4 documents](docs/phase-4-documents.md),
+[Phase 5 profiles](docs/phase-5-profiles.md), [Phase 8 preparation](docs/phase-8-preparation.md),
+[Phase 9 generation](docs/phase-9-generation.md), and [Phase 10 imports](docs/phase-10-imports.md)
+for usage, limits, compatibility and rollback.
 
 Creating a collection requires an `Idempotency-Key` header:
 

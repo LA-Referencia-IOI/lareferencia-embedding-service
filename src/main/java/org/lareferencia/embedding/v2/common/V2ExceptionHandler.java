@@ -48,8 +48,16 @@ public class V2ExceptionHandler {
   ResponseEntity<V2Error> media(Exception e, HttpServletRequest request) {
     return domain(new V2Exception(415,"unsupported_media_type","JSON content type is required"),request);
   }
-  @ExceptionHandler(DataAccessException.class)
-  ResponseEntity<V2Error> database(DataAccessException e, HttpServletRequest request) {
+  @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+  ResponseEntity<V2Error> uploadTooLarge(Exception e,HttpServletRequest request) {
+    return domain(new V2Exception(413,"file_too_large","Import file byte limit exceeded"),request);
+  }
+  @ExceptionHandler(org.springframework.web.multipart.support.MissingServletRequestPartException.class)
+  ResponseEntity<V2Error> missingPart(Exception e,HttpServletRequest request) {
+    return domain(V2Exception.badRequest("Import file and options parts are required"),request);
+  }
+  @ExceptionHandler({DataAccessException.class, org.springframework.transaction.TransactionException.class})
+  ResponseEntity<V2Error> database(Exception e, HttpServletRequest request) {
     return domain(new V2Exception(503,"database_unavailable","Database operation unavailable"),request);
   }
   @ExceptionHandler(Exception.class)

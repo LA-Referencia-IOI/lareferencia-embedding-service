@@ -26,6 +26,7 @@ public class JobRepository {
   public record Lease(UUID jobId,String owner,long token) { }
   public record ItemLease(UUID jobId,String itemKey,UUID documentId,JsonNode locator,String owner,long token,int attempts) { }
   public record ItemError(String itemKey,UUID documentId,JsonNode locator,String code,int attempts) { }
+  public record ImportResult(UUID documentId,long vectorsImported) { }
 
   private static final Set<String> COUNTERS=Set.of("documents_read","documents_processed","documents_failed",
       "units_prepared","vectors_generated","vectors_imported","vectors_reused","items_skipped","retries");
@@ -166,8 +167,11 @@ public class JobRepository {
       long after=job.checkpoint().path("after").asLong(),high=job.checkpoint().path("high_water").asLong();
       var rows=write.query("""
           SELECT id,sequence_id FROM dvp.documents WHERE collection_id=? AND sequence_id>? AND sequence_id<=?
+            AND (jsonb_array_length(COALESCE(?::jsonb->'document_ids','[]'::jsonb))=0
+              OR jsonb_exists(?::jsonb->'document_ids',id::text))
           ORDER BY sequence_id LIMIT ?
-          """,(rs,n)->Map.entry(rs.getObject(1,UUID.class),rs.getLong(2)),job.collectionId(),after,high,size);
+          """,(rs,n)->Map.entry(rs.getObject(1,UUID.class),rs.getLong(2)),job.collectionId(),after,high,
+          json(job.parameters()),json(job.parameters()),size);
       for(var row:rows) write.update("""
           INSERT INTO dvp.job_items(job_id,item_key,document_id,status,locator)
           VALUES (?,?,?,'queued',jsonb_build_object('sequence_id',?)) ON CONFLICT (job_id,item_key) DO NOTHING
@@ -240,6 +244,75 @@ public class JobRepository {
       if(checkpoint!=null) write.update("UPDATE dvp.jobs SET checkpoint=?::jsonb WHERE id=?",json(checkpoint),job.jobId());
     });
   }
+  /** Fenced intermediate work for an item whose later provider call occurs outside the transaction. */
+  public void progress(Lease job,ItemLease item,AdvisoryLock lock,Map<String,Long> increments,Consumer<JdbcTemplate> domainWrite) {
+    Objects.requireNonNull(lock).requireAvailable();
+    if(!Objects.equals(lock.document,item.documentId()) || !COUNTERS.containsAll(increments.keySet())
+        || increments.values().stream().anyMatch(v->v==null || v<0)) throw new IllegalArgumentException("Invalid progress");
+    writes.executeWithoutResult(tx->{
+      requireLease(job);requireItem(job,item);
+      Job current=find(job.jobId()).orElseThrow(LeaseLostException::new);
+      if(!Objects.equals(lock.indexation,current.indexationId())) throw new IllegalArgumentException("Wrong advisory lock indexation");
+      lock.requireAvailable();domainWrite.accept(write);lock.requireAvailable();requireLease(job);requireItem(job,item);
+      for(var entry:increments.entrySet()) write.update("""
+          UPDATE dvp.jobs SET counters=jsonb_set(counters,ARRAY[?],
+            to_jsonb(COALESCE((counters->>?)::bigint,0)+?::bigint),true) WHERE id=?
+          """,entry.getKey(),entry.getKey(),entry.getValue(),job.jobId());
+    });
+  }
+  /** Atomically commit one ordered file record, its counters and its next byte checkpoint. */
+  public void commitImportRecord(Lease lease,long expectedOffset,long nextOffset,long line,JsonNode locator,
+      String errorCode,java.util.function.Function<JdbcTemplate,ImportResult> apply) {
+    commitFileRecord(lease,"offset",expectedOffset,nextOffset,line,"line:",locator,errorCode,apply);
+  }
+  public void commitJsonImportRecord(Lease lease,long expectedOrdinal,long ordinal,JsonNode locator,
+      String errorCode,java.util.function.Function<JdbcTemplate,ImportResult> apply) {
+    commitFileRecord(lease,"ordinal",expectedOrdinal,ordinal,ordinal,"ordinal:",locator,errorCode,apply);
+  }
+  private void commitFileRecord(Lease lease,String position,long expected,long next,long line,String keyPrefix,JsonNode locator,
+      String errorCode,java.util.function.Function<JdbcTemplate,ImportResult> apply) {
+    if(expected<0 || next<expected || line<1 || locator==null || !locator.isObject()
+        || (errorCode!=null && !errorCode.matches("[a-z][a-z0-9_]{0,79}"))) throw new IllegalArgumentException("Invalid import checkpoint");
+    writes.executeWithoutResult(tx->{
+      Boolean valid=write.queryForObject("""
+          SELECT EXISTS(SELECT 1 FROM dvp.jobs WHERE id=? AND kind='import' AND status='running'
+            AND lease_owner=? AND fencing_token=? AND lease_until>clock_timestamp()
+            AND COALESCE((checkpoint->>?)::bigint,0)=? AND NOT COALESCE((checkpoint->>'exhausted')::boolean,false))
+          """,Boolean.class,lease.jobId(),lease.owner(),lease.token(),position,expected);
+      if(!Boolean.TRUE.equals(valid))throw new LeaseLostException();
+      ImportResult result=errorCode==null?Objects.requireNonNull(apply.apply(write)):null;
+      if(result!=null && (result.documentId()==null || result.vectorsImported()<0))throw new IllegalArgumentException("Invalid import result");
+      String itemKey=keyPrefix+String.format(java.util.Locale.ROOT,"%020d",line);
+      write.update("INSERT INTO dvp.job_items(job_id,item_key,document_id,status,locator,error_code,attempts) VALUES (?,?,?,?,?::jsonb,?,1)",
+          lease.jobId(),itemKey,result==null?null:result.documentId(),errorCode==null?"succeeded":"failed",json(locator),errorCode);
+      String terminalCounter=result==null?"documents_failed":"documents_processed";long imported=result==null?0:result.vectorsImported();
+      int fenced=write.update("""
+          UPDATE dvp.jobs SET checkpoint=jsonb_build_object(?::text,?::bigint,'line',?::bigint,'exhausted',false),
+            counters=jsonb_set(jsonb_set(jsonb_set(counters,'{documents_read}',
+              to_jsonb(COALESCE((counters->>'documents_read')::bigint,0)+1),true),ARRAY[?],
+              to_jsonb(COALESCE((counters->>?)::bigint,0)+1),true),'{vectors_imported}',
+              to_jsonb(COALESCE((counters->>'vectors_imported')::bigint,0)+?::bigint),true)
+          WHERE id=? AND kind='import' AND status='running' AND lease_owner=? AND fencing_token=?
+            AND lease_until>clock_timestamp() AND COALESCE((checkpoint->>?)::bigint,0)=?
+            AND NOT COALESCE((checkpoint->>'exhausted')::boolean,false)
+          """,position,next,line,terminalCounter,terminalCounter,imported,lease.jobId(),lease.owner(),lease.token(),position,expected);
+      if(fenced!=1)throw new LeaseLostException();
+      requireLease(lease);
+    });
+  }
+  public void finishImportEnumeration(Lease lease,long expectedOffset,long finalOffset,long line) {
+    finishFileEnumeration(lease,"offset",expectedOffset,finalOffset,line);
+  }
+  public void finishJsonImportEnumeration(Lease lease,long ordinal) {
+    finishFileEnumeration(lease,"ordinal",ordinal,ordinal,ordinal);
+  }
+  private void finishFileEnumeration(Lease lease,String position,long expected,long last,long line) {
+    writes.executeWithoutResult(tx->{requireLease(lease);Job current=lock(lease.jobId());
+      if(!"import".equals(current.kind()) || current.checkpoint().path(position).asLong(0)!=expected || last<expected)
+        throw new LeaseLostException();
+      write.update("UPDATE dvp.jobs SET checkpoint=jsonb_build_object(?::text,?::bigint,'line',?::bigint,'exhausted',true) WHERE id=?",position,last,line,lease.jobId());
+    });
+  }
   /** For generation handlers: refuse publication if the dedicated advisory session is unavailable. */
   public void completeWithAdvisoryLock(Lease job,ItemLease item,String result,String errorCode,
       Map<String,Long> increments,JsonNode checkpoint,AdvisoryLock lock,Consumer<JdbcTemplate> domainWrite) {
@@ -282,12 +355,14 @@ public class JobRepository {
   public boolean finishIfComplete(Lease job) {
     return Boolean.TRUE.equals(writes.execute(tx->{
       requireLease(job);
-      return write.update("""
+      boolean finished=write.update("""
           UPDATE dvp.jobs j SET status=CASE WHEN EXISTS (SELECT 1 FROM dvp.job_items i WHERE i.job_id=j.id AND i.status='failed')
             THEN 'completed_with_errors' ELSE 'succeeded' END,finished_at=now(),lease_owner=NULL,lease_until=NULL
           WHERE j.id=? AND COALESCE((j.checkpoint->>'exhausted')::boolean,false)
             AND NOT EXISTS (SELECT 1 FROM dvp.job_items i WHERE i.job_id=j.id AND i.status IN ('queued','running'))
           """,job.jobId())==1;
+      if(finished)extendImportRetention(job.jobId());
+      return finished;
     }));
   }
   public void release(Lease job,long delayMillis) {
@@ -305,7 +380,18 @@ public class JobRepository {
       requireLease(job);
       write.update("UPDATE dvp.jobs SET status='failed',global_error_code=?,finished_at=clock_timestamp(),lease_owner=NULL,lease_until=NULL WHERE id=?",
           errorCode,job.jobId());
+      extendImportRetention(job.jobId());
     });
+  }
+  private void extendImportRetention(UUID job) {
+    write.update("""
+        WITH RECURSIVE ancestors AS (
+          SELECT id,parent_job_id FROM dvp.jobs WHERE id=?
+          UNION ALL SELECT j.id,j.parent_job_id FROM dvp.jobs j JOIN ancestors a ON j.id=a.parent_job_id
+        ) UPDATE dvp.import_files f SET expires_at=GREATEST(COALESCE(f.expires_at,'-infinity'::timestamptz),
+             clock_timestamp()+(? * interval '1 day'))
+          WHERE f.job_id IN (SELECT id FROM ancestors)
+        """,job,properties.getFileRetentionDays());
   }
 
   /** Milliseconds until the earliest delayed item is eligible; capped to avoid a sleeping worker. */

@@ -24,7 +24,7 @@ import org.springframework.util.LinkedMultiValueMap;
 @EnabledIfEnvironmentVariable(named="DVP_TEST_DB_URL",matches=".+")
 @SpringBootTest(properties={"spring.config.location=classpath:/application.properties","app.dvp.enabled=true",
     "app.dvp.role=all","app.dvp.workers-enabled=true","app.dvp.lease-seconds=3","app.dvp.heartbeat-seconds=1",
-    "app.dvp.worker-poll-millis=100"})
+    "app.dvp.worker-poll-millis=100","spring.main.allow-bean-definition-overriding=true"})
 @Import(WorkerLifecycleIntegrationTest.TestHandler.class)
 class WorkerLifecycleIntegrationTest {
   private static final CountDownLatch started=new CountDownLatch(1),release=new CountDownLatch(1),completed=new CountDownLatch(1);
@@ -33,7 +33,7 @@ class WorkerLifecycleIntegrationTest {
     r.add("spring.datasource.username",()->"postgres");r.add("spring.datasource.password",()->"");
   }
   @TestConfiguration static class TestHandler {
-    @Bean JobHandler testHandler(ObjectMapper mapper) {
+    @Bean JobHandler preparationHandler(ObjectMapper mapper) {
       return new JobHandler() {
         public String kind() { return "prepare"; }
         public JsonNode publicParameters(JsonNode parameters) { return mapper.createObjectNode(); }

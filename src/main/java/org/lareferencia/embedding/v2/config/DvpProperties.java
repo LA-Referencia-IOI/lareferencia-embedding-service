@@ -14,6 +14,7 @@ public class DvpProperties {
   public enum Role { API, WORKER, ALL }
   private boolean enabled = false;
   private boolean workersEnabled = false;
+  private boolean importEnabled = false;
   @NotNull private Role role = Role.API;
   @Min(1) private int readConnections = 8;
   @Min(1) private int coordinationConnections = 2;
@@ -33,6 +34,9 @@ public class DvpProperties {
   @Min(1) private int exactConcurrency = 2;
   @Min(1) private int approximateConcurrency = 16;
   @Min(1) private long maxFileBytes = 10L * 1024 * 1024 * 1024;
+  @Min(1) @jakarta.validation.constraints.Max(2147483639) private long maxImportRecordBytes = 16L * 1024 * 1024;
+  @Min(1) private int maxConcurrentUploads = 2;
+  @Min(1000) private long importCleanupIntervalMs = 3_600_000;
   @NotNull private String fileRoot = "./data/imports";
   @Min(30) private int fileRetentionDays = 30;
   @Min(24) private int temporaryRetentionHours = 24;

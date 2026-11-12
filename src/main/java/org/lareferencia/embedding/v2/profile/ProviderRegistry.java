@@ -42,6 +42,20 @@ public class ProviderRegistry {
     providers=Map.copyOf(configured);
   }
   public boolean contains(String reference) { return reference!=null && providers.containsKey(reference); }
+  public int batchSize(ProfileResource profile) {
+    Connection connection=providers.get(profile.providerRef());
+    if(connection==null) throw new V2Exception(503,"provider_unavailable","Provider configuration unavailable");
+    return connection.batchSize();
+  }
+  /** Sanitized transport classification retained for persisted retry scheduling. */
+  public static final class ProviderFailure extends V2Exception {
+    private final int upstreamStatus;private final String retryAfter;
+    ProviderFailure(int status,String retryAfter) {
+      super(503,"provider_unavailable","Provider request failed");this.upstreamStatus=status;this.retryAfter=retryAfter;
+    }
+    public int upstreamStatus() { return upstreamStatus; }
+    public String retryAfter() { return retryAfter; }
+  }
 
   /** Call only after finishing database transactions. Input is already prepared and bounded by the caller. */
   public List<float[]> embed(ProfileResource profile,List<String> inputs) {
@@ -76,7 +90,7 @@ public class ProviderRegistry {
       var response=c.client().send(builder.build(),HttpResponse.BodyHandlers.ofString());
       if(response.statusCode()>=400 && response.statusCode()<500 && response.statusCode()!=429)
         throw new V2Exception(422,"provider_rejected","Provider rejected the request");
-      if(response.statusCode()<200 || response.statusCode()>=300) throw new V2Exception(503,"provider_unavailable","Provider request failed");
+      if(response.statusCode()<200 || response.statusCode()>=300) throw new ProviderFailure(response.statusCode(),response.headers().firstValue("Retry-After").orElse(null));
       JsonNode root=mapper.readTree(response.body());
       float[][] ordered=new float[inputs.size()][];
       JsonNode data=root==null?null:root.get("data"), nativeVectors=root==null?null:root.get("embeddings");

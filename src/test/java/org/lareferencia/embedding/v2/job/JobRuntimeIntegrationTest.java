@@ -37,7 +37,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.util.LinkedMultiValueMap;
 
 @EnabledIfEnvironmentVariable(named="DVP_TEST_DB_URL",matches=".+")
-@SpringBootTest(properties={"spring.config.location=classpath:/application.properties","app.dvp.enabled=true","app.dvp.role=API","app.dvp.workers-enabled=false"})
+@SpringBootTest(properties={"spring.config.location=classpath:/application.properties","app.dvp.enabled=true","app.dvp.role=API","app.dvp.workers-enabled=false","app.dvp.import-enabled=false","spring.main.allow-bean-definition-overriding=true"})
 @AutoConfigureMockMvc
 @Import(JobRuntimeIntegrationTest.TestHandlers.class)
 class JobRuntimeIntegrationTest {
@@ -131,7 +131,7 @@ class JobRuntimeIntegrationTest {
     var replay=service.create(c,null,"prepare",params,key,path,new LinkedMultiValueMap<>());
     assertEquals(202,first.status());assertEquals(first.body(),replay.body());assertEquals(first.headers(),replay.headers());
     assertThrows(V2Exception.class,()->service.create(c,null,"prepare",mapper.createObjectNode(),key,path,new LinkedMultiValueMap<>()));
-    assertThrows(V2Exception.class,()->service.create(c,null,"generate",params,UUID.randomUUID().toString(),path,new LinkedMultiValueMap<>()));
+    assertThrows(V2Exception.class,()->service.create(c,null,"import",params,UUID.randomUUID().toString(),path,new LinkedMultiValueMap<>()));
     UUID id=first.jobId();
     mvc.perform(get("/api/v2/jobs/"+id)).andExpect(status().isOk()).andExpect(jsonPath("$.parameters.label").value("public"))
         .andExpect(jsonPath("$.parameters.secret").doesNotExist()).andExpect(jsonPath("$.lease_owner").doesNotExist());

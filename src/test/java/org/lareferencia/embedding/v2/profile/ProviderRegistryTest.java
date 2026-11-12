@@ -30,10 +30,11 @@ class ProviderRegistryTest {
       exchange.sendResponseHeaders(200,response.length);exchange.getResponseBody().write(response);exchange.close();});
     server.createContext("/rejected",exchange->{byte[] response="sensitive-provider-detail".getBytes(StandardCharsets.UTF_8);
       exchange.sendResponseHeaders(400,response.length);exchange.getResponseBody().write(response);exchange.close();});
+    server.createContext("/limited",exchange->{exchange.getResponseHeaders().add("Retry-After","12");exchange.sendResponseHeaders(429,-1);exchange.close();});
     server.createContext("/slow",exchange->{entered.countDown();try {release.await(3,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}exchange.close();});
     server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());server.start();
     var p=new ProviderProperties();var map=new LinkedHashMap<String,ProviderProperties.Provider>();
-    for(String name:List.of("first","second","invalid","slow","rejected","secret")) {
+    for(String name:List.of("first","second","invalid","slow","rejected","secret","limited")) {
       var provider=new ProviderProperties.Provider();provider.setType(name.equals("second")?"OLLAMA":"OPENAI_COMPATIBLE");
       provider.setEndpoint("http://127.0.0.1:"+server.getAddress().getPort()+"/"+(name.equals("secret")?"first":name));provider.setConcurrency(1);
       if(name.equals("secret")) provider.setSecretRef("DVP_TEST_MISSING_SECRET_REFERENCE");
@@ -41,6 +42,10 @@ class ProviderRegistryTest {
     }
     p.setProviders(map);executor=new ThreadPoolExecutor(2,2,0,TimeUnit.SECONDS,new SynchronousQueue<>());
     registry=new ProviderRegistry(p,executor,new ObjectMapper());
+  }
+  @Test void preservesSanitizedRateLimitRetryInformation() {
+    var failure=assertThrows(ProviderRegistry.ProviderFailure.class,()->registry.embed(profile("limited","http"),List.of("a")));
+    assertEquals(429,failure.upstreamStatus());assertEquals("12",failure.retryAfter());
   }
   @AfterEach void close() { release.countDown();server.stop(0);executor.shutdownNow(); }
   private ProfileResource profile(String ref,String mode) { return new ProfileResource(UUID.randomUUID(),"slug","model","revision",2,mode,ref,
@@ -67,6 +72,9 @@ class ProviderRegistryTest {
       assertTrue(entered.await(2,TimeUnit.SECONDS));
       assertEquals("inference_busy",assertThrows(V2Exception.class,()->registry.embed(profile("slow","http"),List.of("b"))).code());
       assertEquals("provider_timeout",pending.get(5,TimeUnit.SECONDS).code());
+      release.countDown();
+      org.awaitility.Awaitility.await().atMost(Duration.ofSeconds(3)).untilAsserted(()->
+          assertArrayEquals(new float[]{1,2},registry.embed(profile("first","http"),List.of("a","b")).getFirst()));
     }
   }
   @Test void exhaustedSharedExecutorRejectsWithoutCallingAProvider() throws Exception {

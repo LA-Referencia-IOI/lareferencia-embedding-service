@@ -1,6 +1,6 @@
 # Persistent jobs and index maintenance
 
-The v2 job runtime stores jobs, item state, retry times, progress and checkpoints in PostgreSQL. An API process can report jobs and create an idempotent retry of failed items. The runtime only claims job kinds with a registered handler; the maintenance handler provisions and maintains index configurations. Preparation, generation and import handlers and their creation endpoints become available in their respective phases.
+The v2 job runtime stores jobs, item state, retry times, progress and checkpoints in PostgreSQL. An API process can report jobs and create an idempotent retry of failed items. The runtime only claims job kinds with a registered handler; the maintenance handler provisions and maintains index configurations. The preparation handler is available in [Phase 8](phase-8-preparation.md), generation in [Phase 9](phase-9-generation.md), and opt-in imports in [Phase 10](phase-10-imports.md).
 
 ## Configuration and deployment
 
@@ -16,7 +16,7 @@ The default lease is 120 seconds, renewed every 20 seconds. Configure `DVP_LEASE
 
 Handlers enumerate documents in keyset batches against a captured upper sequence, with at most 100 documents per batch and 1000 queued or running items per job. Item commits require current job and item fencing tokens; result writes, counters and checkpoints belong in the same transaction. Provider operations must run outside write transactions. The dedicated document advisory lock must be held during external operations and its associated completion. Retryable transport, 429 and server errors use persisted bounded backoff; a maximum of five attempts is permitted. External calls themselves may be repeated after a crash: fencing protects database commits, not external side effects. Future handlers must implement their own safe external operation semantics and avoid exposing secrets in parameters or locators.
 
-Import file retention and provider-specific preparation and generation handlers are delivered in their corresponding later phases. Creating an index configuration provisions its table but does not prepare texts or generate embeddings.
+Import file retention is described in the [Phase 10 guide](phase-10-imports.md). Creating an index configuration provisions its table but does not prepare texts or generate embeddings.
 
 ## Index configurations and maintenance
 
@@ -30,7 +30,7 @@ Reconciliation checks the table's required columns and vector dimension, primary
 
 The `capabilities` fields report physical index readiness; vector retrieval and search endpoints are introduced in later phases. `counters.vectors_estimated` comes from PostgreSQL statistics, carries `is_estimate: true`, and can be null until statistics are available. `measured_at` reports the last analyze time when available; listing does not count every vector.
 
-The existing V3/V4 schema is used; no migration or reindex is required to deploy this phase. Existing v1 behavior and already stored vectors are unchanged. For rollback, stop workers and deploy the previous binaries; retain the v2 registry and tables. Phase 8 and later supply preparation, generation, import and search; an index configuration alone does not populate vectors.
+The existing V3/V4 schema is used; no migration or reindex is required to deploy this phase. Existing v1 behavior and already stored vectors are unchanged. For rollback, stop workers and deploy the previous binaries; retain the v2 registry and tables. Phase 8 supplies preparation, Phase 9 supplies generation and Phase 10 supplies imports; search remains a later phase. An index configuration alone does not populate vectors.
 
 ## HTTP request and response examples
 

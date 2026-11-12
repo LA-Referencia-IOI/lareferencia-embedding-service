@@ -34,4 +34,20 @@ class RequestFilterTest {
         (r,s)->r.getInputStream().readAllBytes()));
     assertEquals(413,error.status());
   }
+  @Test void importAdmissionIsBoundedBeforeMultipartParsing() throws Exception {
+    var config=new DvpProperties();config.setEnabled(true);config.setImportEnabled(true);config.setMaxConcurrentUploads(1);
+    var filter=new V2RequestFilter(config,new ObjectMapper().findAndRegisterModules());
+    var entered=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);
+    try(var executor=java.util.concurrent.Executors.newSingleThreadExecutor()) {
+      var pending=executor.submit(()->{var request=new MockHttpServletRequest("POST","/api/v2/collections/123/imports");request.addHeader("Idempotency-Key","one");
+        filter.doFilter(request,new MockHttpServletResponse(),(r,s)->{entered.countDown();try{release.await(5,java.util.concurrent.TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}});return true;});
+      try {
+        assertTrue(entered.await(5,java.util.concurrent.TimeUnit.SECONDS));
+        var second=new MockHttpServletRequest("POST","/api/v2/collections/123/imports");second.addHeader("Idempotency-Key","two");
+        var response=new MockHttpServletResponse();filter.doFilter(second,response,(r,s)->fail("Excess upload should not enter the chain"));
+        assertEquals(429,response.getStatus());assertEquals("1",response.getHeader("Retry-After"));
+      } finally {release.countDown();}
+      assertTrue(pending.get(5,java.util.concurrent.TimeUnit.SECONDS));
+    }
+  }
 }

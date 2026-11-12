@@ -17,7 +17,8 @@ public class V2RequestFilter extends OncePerRequestFilter {
   public static final String REQUEST_ID = "dvp.request_id";
   private final DvpProperties properties;
   private final ObjectMapper mapper;
-  public V2RequestFilter(DvpProperties properties, ObjectMapper mapper) { this.properties=properties; this.mapper=mapper; }
+  private final java.util.concurrent.Semaphore uploads;
+  public V2RequestFilter(DvpProperties properties, ObjectMapper mapper) { this.properties=properties; this.mapper=mapper;this.uploads=new java.util.concurrent.Semaphore(properties.getMaxConcurrentUploads()); }
   @Override protected boolean shouldNotFilter(HttpServletRequest r) {
     String path=r.getRequestURI().substring(r.getContextPath().length());
     return !(path.equals("/api/v2") || path.startsWith("/api/v2/"));
@@ -29,16 +30,25 @@ public class V2RequestFilter extends OncePerRequestFilter {
     if (!properties.isEnabled() || properties.getRole()==DvpProperties.Role.WORKER) {
       error(response,404,"not_found","API v2 is disabled for this process",id); return;
     }
-    if (request.getContentLengthLong()>properties.getMaxRequestBytes()) {
+    String path=request.getRequestURI().substring(request.getContextPath().length());
+    boolean upload=properties.isImportEnabled() && "POST".equals(request.getMethod()) && path.matches("/api/v2/collections/[^/]+/imports");
+    long maxBytes=properties.getMaxRequestBytes();
+    if(upload) maxBytes=properties.getMaxFileBytes()>Long.MAX_VALUE-maxBytes?Long.MAX_VALUE:properties.getMaxFileBytes()+maxBytes;
+    final long bodyLimit=maxBytes;
+    if (request.getContentLengthLong()>bodyLimit) {
       error(response,413,"request_too_large","Request byte limit exceeded",id); return;
     }
+    if(upload && (request.getHeader("Idempotency-Key")==null || request.getHeader("Idempotency-Key").isBlank())) {
+      error(response,400,"invalid_request","Idempotency-Key header is required",id);return;
+    }
+    if(upload && !uploads.tryAcquire()) {response.setHeader("Retry-After","1");error(response,429,"upload_busy","Upload capacity is exhausted",id);return;}
     var wrapped = new HttpServletRequestWrapper(request) {
       @Override public ServletInputStream getInputStream() throws IOException {
         ServletInputStream input=super.getInputStream();
         return new ServletInputStream() {
           private long count;
           private void add(long n) {
-            if (n>0 && (count+=n)>properties.getMaxRequestBytes()) {
+            if (n>0 && (count+=n)>bodyLimit) {
               throw new V2Exception(413,"request_too_large","Request byte limit exceeded");
             }
           }
@@ -52,7 +62,7 @@ public class V2RequestFilter extends OncePerRequestFilter {
         };
       }
     };
-    chain.doFilter(wrapped,response);
+    try {chain.doFilter(wrapped,response);} finally {if(upload)uploads.release();}
   }
   private void error(HttpServletResponse response,int status,String code,String message,String id) throws IOException {
     response.setStatus(status); response.setContentType("application/json"); response.setCharacterEncoding("UTF-8");
