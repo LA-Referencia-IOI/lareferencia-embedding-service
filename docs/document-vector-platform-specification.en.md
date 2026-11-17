@@ -23,11 +23,11 @@ Extend LA Referencia Embedding Service to store documents, their source texts, a
 | Ingestion | API, JSON and JSONL; texts with optional vectors. |
 | Update | Explicit partial update and full replacement. |
 | Search | Text or vector, results by document or vectorized unit; approximate and exact. |
-| Validity | Only vectors representing the current source revision are served. |
+| Validity | Text-linked vectors must match the current source revision; imported document-level vectors are retained until replaced or their document is deleted. |
 | Metadata | Stored and may be returned; no search filters initially. |
 | Design scale | 10–50 million documents per collection, multiple texts and index configurations. |
 
-The initial release excludes: hybrid search, reranking with other models, arbitrary filters, aggregated vectors without text, embedded inference, graphical interface, or PDF transformation. Authentication and authorization preserve the existing deployment boundary; a collection is not equivalent to a multi-user security mechanism.
+The initial release excludes: hybrid search, reranking with other models, arbitrary filters, embedded inference, graphical interface, or PDF transformation. Authentication and authorization preserve the existing deployment boundary; a collection is not equivalent to a multi-user security mechanism.
 
 This document specifies future work; it does not modify the application or run migrations. The implementation MUST provide a verifiable OpenAPI specification matching the contracts below.
 
@@ -49,7 +49,8 @@ erDiagram
     DOCUMENT ||--o{ SOURCE_TEXT : contains
     COLLECTION ||--o{ INDEXATION : defines
     EMBEDDING_PROFILE ||--o{ INDEXATION : configures
-    SOURCE_TEXT ||--o{ VECTOR_UNIT : produces
+    SOURCE_TEXT o|--o{ VECTOR_UNIT : produces
+    DOCUMENT ||--o{ VECTOR_UNIT : owns
     INDEXATION ||--o{ VECTOR_UNIT : selects
     INDEXATION ||--|| VECTOR_TABLE : owns
     VECTOR_UNIT ||--o| VECTOR_ROW : represents
@@ -59,7 +60,7 @@ erDiagram
 
 Separate v1/v2 controllers, the document domain, preparation/chunking, providers, vector repositories, and workers. Providers and instrumentation may be shared; the identity, normalization, and storage rules of v1 and v2 are not conflated.
 
-**Terminology:** An **index configuration** is the resource called *indexación* in the Spanish specification: it binds a collection to an embedding profile, text-selection rules, chunking policy, distance metric, and a dedicated vector table. API and schema identifiers such as `indexations` and `indexation_id` are unchanged. **Chunking** means splitting source text into vectorizable units. **Current** means that a vector represents the current source revision.
+**Terminology:** An **index configuration** is the resource called *indexación* in the Spanish specification: it binds a collection to an embedding profile, text-selection rules, chunking policy, distance metric, and a dedicated vector table. API and schema identifiers such as `indexations` and `indexation_id` are unchanged. **Chunking** means splitting source text into vectorizable units. For a text-linked vector, **current** means that it represents the current source revision. An imported document-level vector has no source-text revision and remains current until replaced or its document is deleted.
 
 **Mandatory invariants:**
 
@@ -67,7 +68,7 @@ Separate v1/v2 controllers, the document domain, preparation/chunking, providers
 2. A text has a unique key within the document. Two identical texts remain distinct entities.
 3. An index configuration belongs to a collection and an immutable profile. It has immutable selection, chunking, and metric.
 4. Each index configuration has its own table, even if another uses the same model. A query does not join tables of different index configurations to search for neighbors.
-5. A unit represents a concrete version of a text in an index configuration. There is at most one active vector per unit.
+5. A unit represents either a concrete version of a text or an imported document-level embedding identified independently of the texts. There is at most one active vector per unit.
 6. A hash detects identical inputs and enables reuse of computed embeddings; it never replaces the document identifier.
 7. The vector length matches the profile; all its components must be finite and representable in float32. For cosine distance, vectors with zero norm are rejected.
 8. Matching model names alone must not be used to treat profiles, revisions, text preparation rules, or dimensions as interchangeable.
@@ -448,6 +449,8 @@ For a concurrent creation, first resolve the unique key `(collection_id,external
 
 ### 7.1 Contract
 
+**Document-level import extension:** Documents without embeddings may use abbreviated `texts` objects (`knd`, optional `lng`, `cnt`) without a profile or indexation. In addition to the original text-linked representation below, records may provide full `embedding_profile` and `indexation` objects, abbreviated `texts` objects (`knd`, optional `lng`, `cnt`), and document-level `embeddings` objects (`id`, `vec`). The importer atomically creates missing resources, reuses matching definitions, and fails a record with a conflict when a slug has a different definition. Embedding IDs are scoped to document/indexation and are independent of source texts. Importing the same ID replaces its vector; omitted IDs remain. Document-level vectors persist across text and metadata edits until replaced by import or the document is deleted. They do not require a source text or prepared-input hash. Dimensions, numeric values and metric/index constraints still apply. The original `text_id`-based format remains supported for text-linked vectors. V5 adds nullable source references for document-level units and extends existing vector tables; the earlier schema examples describe the text-linked baseline. See [the platform guide](PLATFORM-GUIDE.md#import-document-level-embeddings-with-inline-configuration) and [example file](examples/import-document-vectors.json).
+
 `POST /collections/{c}/imports`, `multipart/form-data`:
 
 - `file`: uncompressed UTF-8 file, JSON or JSONL.
@@ -483,9 +486,9 @@ Example JSONL record using a three-dimensional profile and index configuration:
 
 The illustrative hash MUST be replaced by the real SHA-256 of the input prepared according to the profile. Vectors are omitted entirely when only content is imported. In JSON the record has the same fields except `schema_version`, inherited from the container.
 
-Per vector, `indexation_id`, `profile_id`, `text_id`, `input_hash` and `values` are required; `on_conflict` is `keep` by default or `replace`. The index configuration must be ready, belong to the collection, use that profile and `chunking.mode=none`. The text must appear in the same record and satisfy the selection. A text may have vectors in several different index configurations; repeating `(indexation_id,text_id)` within the record produces 422.
+For the original text-linked format, per vector, `indexation_id`, `profile_id`, `text_id`, `input_hash` and `values` are required; `on_conflict` is `keep` by default or `replace`. The index configuration must be ready, belong to the collection, use that profile and `chunking.mode=none`. The text must appear in the same record and satisfy the selection. A text may have vectors in several different index configurations; repeating `(indexation_id,text_id)` within the record produces 422.
 
-Vectors without text and references to internal automatic fragments are not admitted in this version. Declaring an import profile does not establish semantic equivalence; the uploader attests to the model, preparation rules, and model revision. For `keep`, if there is already a current vector it is kept; `replace` substitutes it atomically for that unit. After changing the content there is no current vector to retain. Vectors not re-sent are kept only if their sources did not change.
+In the original text-linked format, vectors without text and references to internal automatic fragments are not admitted; the document-level extension above permits vectors independent of texts. Declaring an import profile does not establish semantic equivalence; the uploader attests to the model, preparation rules, and model revision. For `keep`, if there is already a current vector it is kept; `replace` substitutes it atomically for that unit. After changing the content there is no current vector to retain. Vectors not re-sent are kept only if their sources did not change.
 
 ### 7.2 Atomicity, errors and resubmission
 
@@ -559,7 +562,7 @@ Coverage per document/index configuration: `not_applicable` if there are no sele
 
 Existing document without vectors: **200**, `items:[]` and corresponding coverage; nonexistent document: **404**. An index configuration that is not ready returns 409 on the configuration-specific route. The route covering all index configurations adds `unavailable_indexation_ids` for the not-ready ones and does not fail because of them. Collection without index configurations: empty map and items. `include=texts` adds the exact text of each unit and source text data; `include=metadata` adds metadata to the document. Without `include`, neither bodies nor metadata are transferred. Nothing is recomputed, not even if coverage is `pending`.
 
-The minimum source-revision validity predicate used by these routes and by search is:
+The following minimum source-revision validity predicate applies to **text-linked** vectors. Document-level units have no source reference; retrieval and search include them by their document and indexation scope instead:
 
 ```sql
 -- v is a row in the requested index configuration's vector table.

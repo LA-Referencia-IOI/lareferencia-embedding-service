@@ -1,0 +1,32 @@
+{
+  "schema_version": "1",
+  "documents": [
+    {
+      "external_id": "example:document-embedding-002",
+      "metadata": {"title": "Open science 2"},
+      "embedding_profile": {
+        "slug": "external-model-three-dimensions",
+        "model": "example-model",
+        "model_revision": "v1",
+        "dimensions": 3,
+        "execution_mode": "import_only",
+        "preparation": {"version": "identity-v1"}
+      },
+      "indexation": {
+        "slug": "document-vectors",
+        "selection": {"kinds": [], "languages": []},
+        "chunking": {"mode": "none"},
+        "metric": "cosine",
+        "ann_strategy": "hnsw_vector"
+      },
+      "texts": [
+        {"knd": "title", "lng": "en", "cnt": "Open science 2"},
+        {"knd": "abstract", "lng": "en", "cnt": "Open science 2 makes research more accessible."}
+      ],
+      "embeddings": [
+        {"id": "document-representation-v1", "vec": [0.2, 0.2, 0.3]},
+        {"id": "document-representation-v2", "vec": [0.2, 0.3, 0.4]}
+      ]
+    }
+  ]
+}

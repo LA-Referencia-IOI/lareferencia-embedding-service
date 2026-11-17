@@ -28,21 +28,27 @@ class PreparationIntegrationTest {
   @Autowired MockMvc mvc;@Autowired ObjectMapper mapper;@Autowired @Qualifier("jdbcTemplate") JdbcTemplate jdbc;
   @Autowired JobRepository jobs;@Autowired JobHandlers handlers;
   @MockitoBean org.lareferencia.embedding.v2.profile.ProviderRegistry providers;
-  @org.junit.jupiter.api.AfterEach void noInference() {
-    org.mockito.Mockito.verify(providers,org.mockito.Mockito.never()).embed(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any());
+  @org.junit.jupiter.api.BeforeEach void mockInference() {
+    org.mockito.Mockito.when(providers.batchSize(org.mockito.ArgumentMatchers.any())).thenReturn(16);
+    org.mockito.Mockito.when(providers.embed(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.anyList()))
+        .thenAnswer(call -> call.<List<String>>getArgument(1).stream().map(input -> new float[]{1,2,3}).toList());
   }
   record Fixture(UUID collection,UUID indexation) { }
   private Fixture fixture(String selection,String chunking) {
     UUID c=UUID.randomUUID(),p=UUID.randomUUID(),i=UUID.randomUUID();
     jdbc.update("INSERT INTO dvp.collections(id,slug,name) VALUES (?,?,?)",c,"c-"+c,"test");
     jdbc.update("""
-        INSERT INTO dvp.embedding_profiles(id,slug,model,model_revision,dimensions,execution_mode,preparation,fingerprint)
-        VALUES (?,?,?,'v1',3,'import_only','{"version":"identity-v1","document_prefix":"passage: ","query_prefix":""}'::jsonb,?)
+        INSERT INTO dvp.embedding_profiles(id,slug,model,model_revision,dimensions,execution_mode,provider_ref,preparation,fingerprint)
+        VALUES (?,?,?,'v1',3,'http','test','{"version":"identity-v1","document_prefix":"passage: ","query_prefix":""}'::jsonb,?)
         """,p,"p-"+p,"test-model",(p.toString().replace("-","")).repeat(2));
     jdbc.update("""
         INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state)
         VALUES (?,?,?, ?,?::jsonb,?::jsonb,'cosine','none',?,'ready','disabled')
         """,i,c,"index",p,selection,chunking,"vec_"+i.toString().replace("-",""));
+    String table="vec_"+i.toString().replace("-","");
+    jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY, document_id uuid NOT NULL, indexation_id uuid NOT NULL, "
+        +"embedding vector(3) NOT NULL, input_hash char(64), origin varchar(10), origin_job_id uuid, "
+        +"FOREIGN KEY(unit_id,document_id,indexation_id) REFERENCES dvp.vector_units(id,document_id,indexation_id) ON DELETE CASCADE)");
     return new Fixture(c,i);
   }
   private UUID document(Fixture f,String name,String kind,String language,String content) {
@@ -51,14 +57,14 @@ class PreparationIntegrationTest {
     jdbc.update("INSERT INTO dvp.source_texts(id,document_id,text_key,kind,language,content,content_hash) VALUES (?,?,'text',?,?,?,?)",
         text,doc,kind,language,content,"a".repeat(64));return doc;
   }
-  private String route(Fixture f) {return "/api/v2/collections/"+f.collection()+"/indexations/"+f.indexation()+"/preparation-jobs";}
+  private String route(Fixture f) {return "/api/v2/collections/"+f.collection()+"/indexations/"+f.indexation()+"/generation-jobs";}
   private MvcResult submit(Fixture f,String key,String body,int expected) throws Exception {
     return mvc.perform(post(route(f)).header("Idempotency-Key",key).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().is(expected)).andReturn();
   }
   private UUID id(MvcResult response) throws Exception {return UUID.fromString(mapper.readTree(response.getResponse().getContentAsString()).path("id").asText());}
   private void run(UUID id) throws Exception {
-    var lease=jobs.claim("test-"+UUID.randomUUID(),Set.of("prepare")).orElseThrow();assertEquals(id,lease.jobId());
-    handlers.find("prepare").orElseThrow().run(lease,jobs);assertTrue(jobs.finishIfComplete(lease));
+    var lease=jobs.claim("test-"+UUID.randomUUID(),Set.of("generate")).orElseThrow();assertEquals(id,lease.jobId());
+    handlers.find("generate").orElseThrow().run(lease,jobs);assertTrue(jobs.finishIfComplete(lease));
   }
   @Test void preparesSelectedDocumentsWithExactOffsetsAndIsIdempotent() throws Exception {
     Fixture f=fixture("{\"kinds\":[\"abstract\"],\"languages\":[\"en\"]}","{\"mode\":\"characters-v1\",\"max_chars\":4,\"overlap_chars\":1}");
@@ -69,6 +75,8 @@ class PreparationIntegrationTest {
     assertEquals(2,jobs.find(id(first)).orElseThrow().counters().path("units_prepared").asInt());
     var units=jdbc.queryForList("SELECT ordinal,start_cp,end_cp,input_hash FROM dvp.vector_units WHERE document_id=? ORDER BY ordinal",selected);
     assertEquals(2,units.size());assertEquals(0,units.get(0).get("start_cp"));assertEquals(4,units.get(0).get("end_cp"));
+    assertEquals(2,jdbc.queryForObject("SELECT p.expected_units FROM dvp.text_indexation_progress p JOIN dvp.source_texts s ON s.id=p.source_id WHERE s.document_id=? AND p.indexation_id=?",Integer.class,selected,f.indexation()));
+    assertEquals("complete",jdbc.queryForObject("SELECT p.state FROM dvp.text_indexation_progress p JOIN dvp.source_texts s ON s.id=p.source_id WHERE s.document_id=? AND p.indexation_id=?",String.class,selected,f.indexation()));
     assertEquals(3,units.get(1).get("start_cp"));assertEquals(7,units.get(1).get("end_cp"));
     assertEquals(java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest("passage: 🧬abc".getBytes(java.nio.charset.StandardCharsets.UTF_8))),units.get(0).get("input_hash"));
     assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=?",Integer.class,excluded));
@@ -88,37 +96,36 @@ class PreparationIntegrationTest {
     jdbc.update("UPDATE dvp.indexations SET state='failed' WHERE id=?",f.indexation());
     submit(f,UUID.randomUUID().toString(),"{}",409);
   }
-  @Test void sourceChangeInvalidatesOldUnitsAndPreparationUsesNewRevision() throws Exception {
+  @Test void sourceChangeKeepsExistingUnitsAndPreparesNewContent() throws Exception {
     Fixture f=fixture("{}","{\"mode\":\"none\"}");UUID doc=document(f,"revision","title",null,"before");
     run(id(submit(f,UUID.randomUUID().toString(),"{}",202)));
-    assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=? AND source_revision=1",Integer.class,doc));
-    mvc.perform(patch("/api/v2/collections/"+f.collection()+"/documents/by-external-id").param("external_id","revision")
-        .contentType(MediaType.APPLICATION_JSON).content("{\"texts\":[{\"text_id\":\"text\",\"kind\":\"title\",\"content\":\"after\"}]}"))
-        .andExpect(status().isOk());
-    assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=?",Integer.class,doc));
+    assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=? AND prepared_text='before'",Integer.class,doc));
+    assertEquals("complete",jdbc.queryForObject("SELECT p.state FROM dvp.text_indexation_progress p JOIN dvp.source_texts s ON s.id=p.source_id WHERE s.document_id=? AND p.indexation_id=?",String.class,doc,f.indexation()));
+    jdbc.update("UPDATE dvp.source_texts SET content='after',revision=revision+1 WHERE document_id=?",doc);
     run(id(submit(f,UUID.randomUUID().toString(),"{}",202)));
-    assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=? AND source_revision=2",Integer.class,doc));
+    assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=?",Integer.class,doc));
+    assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=? AND prepared_text='after'",Integer.class,doc));
   }
   @Test void deletedDocumentAfterEnumerationIsSkippedSafely() throws Exception {
     Fixture f=fixture("{}","{\"mode\":\"none\"}");UUID doc=document(f,"gone","title",null,"body");
     UUID job=id(submit(f,UUID.randomUUID().toString(),"{}",202));
-    var lease=jobs.claim("test-"+UUID.randomUUID(),Set.of("prepare")).orElseThrow();assertEquals(job,lease.jobId());
+    var lease=jobs.claim("test-"+UUID.randomUUID(),Set.of("generate")).orElseThrow();assertEquals(job,lease.jobId());
     jobs.initializeEnumeration(lease);assertEquals(1,jobs.materialize(lease));
     mvc.perform(delete("/api/v2/collections/"+f.collection()+"/documents/"+doc)).andExpect(status().isNoContent());
-    handlers.find("prepare").orElseThrow().run(lease,jobs);assertTrue(jobs.finishIfComplete(lease));
+    handlers.find("generate").orElseThrow().run(lease,jobs);assertTrue(jobs.finishIfComplete(lease));
     assertEquals("skipped",jdbc.queryForObject("SELECT status FROM dvp.job_items WHERE job_id=?",String.class,job));
     assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=?",Integer.class,doc));
   }
   @Test void documentLockMakesPreparationObserveTheCommittedSourceRevision() throws Exception {
     Fixture f=fixture("{}","{\"mode\":\"none\"}");UUID doc=document(f,"locked","title",null,"before");
     UUID job=id(submit(f,UUID.randomUUID().toString(),"{}",202));
-    var lease=jobs.claim("test-"+UUID.randomUUID(),Set.of("prepare")).orElseThrow();assertEquals(job,lease.jobId());
+    var lease=jobs.claim("test-"+UUID.randomUUID(),Set.of("generate")).orElseThrow();assertEquals(job,lease.jobId());
     jobs.initializeEnumeration(lease);assertEquals(1,jobs.materialize(lease));
     try(var connection=jdbc.getDataSource().getConnection();var executor=java.util.concurrent.Executors.newSingleThreadExecutor()) {
       connection.setAutoCommit(false);
       try(var lock=connection.prepareStatement("SELECT id FROM dvp.documents WHERE id=? FOR UPDATE")){lock.setObject(1,doc);lock.execute();}
       try(var update=connection.prepareStatement("UPDATE dvp.source_texts SET content='after',revision=revision+1 WHERE document_id=?")){update.setObject(1,doc);update.executeUpdate();}
-      var pending=executor.submit(()->{handlers.find("prepare").orElseThrow().run(lease,jobs);return true;});
+      var pending=executor.submit(()->{handlers.find("generate").orElseThrow().run(lease,jobs);return true;});
       try {
         org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5)).until(()->jdbc.queryForObject(
             "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%dvp.documents%FOR UPDATE%')",Boolean.class));
@@ -126,27 +133,27 @@ class PreparationIntegrationTest {
       } finally {connection.commit();}
       assertTrue(pending.get(5,java.util.concurrent.TimeUnit.SECONDS));assertTrue(jobs.finishIfComplete(lease));
     }
-    assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=? AND source_revision=2",Integer.class,doc));
-    assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=? AND source_revision=1",Integer.class,doc));
+    assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=? AND prepared_text='after'",Integer.class,doc));
+    assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=? AND prepared_text='before'",Integer.class,doc));
   }
   @Test void enumerationUsesTheCapturedCollectionHighWaterMark() throws Exception {
     Fixture f=fixture("{}","{\"mode\":\"none\"}");UUID first=document(f,"first","title",null,"one");
     UUID job=id(submit(f,UUID.randomUUID().toString(),"{}",202));
-    var lease=jobs.claim("test-"+UUID.randomUUID(),Set.of("prepare")).orElseThrow();assertEquals(job,lease.jobId());
+    var lease=jobs.claim("test-"+UUID.randomUUID(),Set.of("generate")).orElseThrow();assertEquals(job,lease.jobId());
     jobs.initializeEnumeration(lease);UUID later=document(f,"later","title",null,"two");
-    handlers.find("prepare").orElseThrow().run(lease,jobs);assertTrue(jobs.finishIfComplete(lease));
+    handlers.find("generate").orElseThrow().run(lease,jobs);assertTrue(jobs.finishIfComplete(lease));
     assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=?",Integer.class,first));
     assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=?",Integer.class,later));
   }
   @Test void expiredLeaseCannotPublishAndAReplacementWorkerResumes() throws Exception {
     Fixture f=fixture("{}","{\"mode\":\"none\"}");UUID doc=document(f,"recover","title",null,"body");
     UUID job=id(submit(f,UUID.randomUUID().toString(),"{}",202));
-    var old=jobs.claim("old-"+UUID.randomUUID(),Set.of("prepare")).orElseThrow();
+    var old=jobs.claim("old-"+UUID.randomUUID(),Set.of("generate")).orElseThrow();
     jobs.initializeEnumeration(old);assertEquals(1,jobs.materialize(old));
     jdbc.update("UPDATE dvp.jobs SET lease_until=clock_timestamp()-interval '1 second' WHERE id=?",job);
-    var replacement=jobs.claim("new-"+UUID.randomUUID(),Set.of("prepare")).orElseThrow();assertEquals(job,replacement.jobId());
-    assertThrows(JobRepository.LeaseLostException.class,()->handlers.find("prepare").orElseThrow().run(old,jobs));
-    handlers.find("prepare").orElseThrow().run(replacement,jobs);assertTrue(jobs.finishIfComplete(replacement));
+    var replacement=jobs.claim("new-"+UUID.randomUUID(),Set.of("generate")).orElseThrow();assertEquals(job,replacement.jobId());
+    assertThrows(JobRepository.LeaseLostException.class,()->handlers.find("generate").orElseThrow().run(old,jobs));
+    handlers.find("generate").orElseThrow().run(replacement,jobs);assertTrue(jobs.finishIfComplete(replacement));
     assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=?",Integer.class,doc));
   }
 }

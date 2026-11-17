@@ -20,8 +20,9 @@ public class VectorRetrievalService {
   }
   private record Document(UUID id,String external,long revision,String metadata) {}
   private record Config(UUID id,UUID profile,String model,String revision,int dimensions,String table,String state,JsonNode selection) {}
-  private record Text(UUID id,String key,String kind,String language,String content,long revision) {}
-  private record Unit(UUID id,UUID text,long sourceRevision,int ordinal,int start,int end,String origin,String vector) {}
+  private record Text(UUID id,String key,String kind,String language,long revision) {}
+  private record Progress(long revision,int expected,String state) {}
+  private record Unit(UUID id,int ordinal,int start,int end,String origin,String vector,String embeddingKey,String preparedText) {}
   public Map<String,Object> get(String collection,String indexation,String document,boolean external,MultiValueMap<String,String> query) {
     UUID c=uuid(collection), i=indexation==null?null:uuid(indexation), d=external?null:uuid(document);
     Set<String> allowed=external?Set.of("external_id","limit","cursor","include"):Set.of("limit","cursor","include");
@@ -49,28 +50,45 @@ public class VectorRetrievalService {
     var configs=jdbc.query("SELECT i.id,i.profile_id,p.model,p.model_revision,p.dimensions,i.vector_table,i.state,i.selection::text FROM dvp.indexations i JOIN dvp.embedding_profiles p ON p.id=i.profile_id WHERE i.collection_id=?"+(indexation==null?"":" AND i.id=?")+" ORDER BY i.id",(rs,n)->new Config(rs.getObject(1,UUID.class),rs.getObject(2,UUID.class),rs.getString(3),rs.getString(4),rs.getInt(5),rs.getString(6),rs.getString(7),json(rs.getString(8))),indexation==null?new Object[]{collection}:new Object[]{collection,indexation});
     if(indexation!=null && configs.isEmpty())throw new V2Exception(404,"not_found","Resource not found");
     if(indexation!=null && !configs.getFirst().state().equals("ready"))throw new V2Exception(409,"indexation_unavailable","Index configuration is not ready");
-    var texts=jdbc.query("SELECT id,text_key,kind,language,"+(includes.contains("texts")?"content":"NULL::text")+",revision FROM dvp.source_texts WHERE document_id=?",(rs,n)->new Text(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getLong(6)),doc.id());
-    Map<UUID,Text> textById=new HashMap<>();texts.forEach(t->textById.put(t.id(),t));
+    var texts=jdbc.query("SELECT id,text_key,kind,language,revision FROM dvp.source_texts WHERE document_id=? ORDER BY text_key COLLATE \"C\"",(rs,n)->new Text(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3),rs.getString(4),rs.getLong(5)),doc.id());
     Map<String,Object> descriptors=new LinkedHashMap<>();List<UUID> unavailable=new ArrayList<>();List<Map<String,Object>> items=new ArrayList<>();boolean more=false;UUID lastIndex=null,lastUnit=null;
     for(Config config:configs) {
       if(!config.state().equals("ready")) {unavailable.add(config.id());continue;}
       if(!config.table().equals("vec_"+config.id().toString().replace("-",""))) throw new IllegalStateException("Invalid vector table identity");
       String table="dvp."+config.table();
       List<Text> eligible=texts.stream().filter(t->matches(config.selection().path("kinds"),t.kind()) && matches(config.selection().path("languages"),t.language())).toList();
-      String joins=" FROM dvp.vector_units u JOIN dvp.source_texts s ON s.id=u.source_text_id AND s.document_id=u.document_id AND s.revision=u.source_revision JOIN dvp.indexations i ON i.id=u.indexation_id LEFT JOIN "+table+" v ON v.unit_id=u.id AND v.document_id=u.document_id AND v.source_text_id=u.source_text_id AND v.source_revision=u.source_revision AND v.indexation_id=u.indexation_id WHERE u.document_id=? AND u.collection_id=? AND u.indexation_id=? AND (COALESCE(jsonb_array_length(i.selection->'kinds'),0)=0 OR jsonb_exists(i.selection->'kinds',s.kind)) AND (COALESCE(jsonb_array_length(i.selection->'languages'),0)=0 OR jsonb_exists(i.selection->'languages',s.language))";
-      long[] counts=jdbc.queryForObject("SELECT count(*),count(v.unit_id),count(DISTINCT u.source_text_id)"+joins,(rs,n)->new long[]{rs.getLong(1),rs.getLong(2),rs.getLong(3)},doc.id(),collection,config.id());
-      long preparedUnits=counts[0],current=counts[1],missing=preparedUnits-current,unprepared=eligible.size()-counts[2];
-      String state=eligible.isEmpty()?"not_applicable":current==0?"pending":(unprepared>0||missing>0)?"partial":"complete";
-      var coverage=Map.of("state",state,"eligible_texts",eligible.size(),"unprepared_texts",unprepared,"prepared_units",preparedUnits,"current_vectors",current,"missing_vectors",missing);
+      Map<UUID,Progress> progress=new HashMap<>();
+      jdbc.query("SELECT p.source_id,p.revision,p.expected_units,p.state FROM dvp.text_indexation_progress p JOIN dvp.source_texts s ON s.id=p.source_id WHERE p.indexation_id=? AND s.document_id=?",rs->{progress.put(rs.getObject(1,UUID.class),new Progress(rs.getLong(2),rs.getInt(3),rs.getString(4)));},config.id(),doc.id());
+      var textProgress=new ArrayList<Map<String,Object>>();var ordinals=new HashMap<List<String>,Integer>();int unprepared=0,completed=0;
+      for(Text text:eligible) {
+        List<String> group=Arrays.asList(text.kind(),text.language());int ordinal=ordinals.merge(group,1,Integer::sum)-1;
+        if(text.key().startsWith("import:")) try {ordinal=Integer.parseInt(text.key().substring(text.key().lastIndexOf(':')+1));} catch(NumberFormatException ignored) { /* Legacy key. */ }
+        Progress marker=progress.get(text.id());boolean current=marker!=null && marker.revision()==text.revision();
+        String status=current?marker.state():"pending";
+        if(!current)unprepared++;if(status.equals("complete"))completed++;
+        var entry=new LinkedHashMap<String,Object>();entry.put("knd",text.kind());entry.put("lng",text.language());entry.put("ordinal",ordinal);entry.put("revision",text.revision());entry.put("state",status);entry.put("expected_units",current?marker.expected():null);textProgress.add(entry);
+      }
+      String joins=" FROM dvp.vector_units u LEFT JOIN "+table+" v ON v.unit_id=u.id AND v.document_id=u.document_id AND v.indexation_id=u.indexation_id WHERE u.document_id=? AND u.collection_id=? AND u.indexation_id=?";
+      long[] counts=jdbc.queryForObject("SELECT count(*) FILTER (WHERE u.prepared_key IS NOT NULL),count(v.unit_id) FILTER (WHERE u.prepared_key IS NOT NULL),count(v.unit_id) FILTER (WHERE u.embedding_key IS NOT NULL)"+joins,(rs,n)->new long[]{rs.getLong(1),rs.getLong(2),rs.getLong(3)},doc.id(),collection,config.id());
+      long preparedUnits=counts[0],current=counts[1],missing=preparedUnits-current;
+      var coverage=new LinkedHashMap<String,Object>();
+      coverage.put("state",eligible.isEmpty()?"not_applicable":completed==eligible.size()?"complete":completed>0?"partial":"pending");
+      coverage.put("eligible_texts",eligible.size());coverage.put("unprepared_texts",unprepared);coverage.put("texts",textProgress);
+      coverage.put("prepared_units",preparedUnits);coverage.put("current_vectors",current);
+      coverage.put("missing_vectors",missing);coverage.put("document_vectors",counts[2]);
       descriptors.put(config.id().toString(),Map.of("profile_id",config.profile(),"model",config.model(),"model_revision",config.revision(),"dimensions",config.dimensions(),"coverage",coverage));
       if(afterIndex!=null && compare(config.id(),afterIndex)<0) continue;
       UUID start=afterIndex!=null && config.id().equals(afterIndex)?afterUnit:null;
-      var units=jdbc.query("SELECT u.id,u.source_text_id,u.source_revision,u.ordinal,u.start_cp,u.end_cp,v.origin,v.embedding::text"+joins+" AND v.unit_id IS NOT NULL"+(start==null?"":" AND u.id>?")+" ORDER BY u.id LIMIT ?",(rs,n)->new Unit(rs.getObject(1,UUID.class),rs.getObject(2,UUID.class),rs.getLong(3),rs.getInt(4),rs.getInt(5),rs.getInt(6),rs.getString(7),rs.getString(8)),start==null?new Object[]{doc.id(),collection,config.id(),limit-items.size()+1}:new Object[]{doc.id(),collection,config.id(),start,limit-items.size()+1});
+      String sql="SELECT u.id,u.ordinal,u.start_cp,u.end_cp,v.origin,v.embedding::text,u.embedding_key,u.prepared_text"+joins+" AND v.unit_id IS NOT NULL"+(start==null?"":" AND u.id>?")+" ORDER BY u.id LIMIT ?";
+      var units=jdbc.query(sql,(rs,n)->new Unit(rs.getObject(1,UUID.class),rs.getInt(2),rs.getInt(3),rs.getInt(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getString(8)),start==null?new Object[]{doc.id(),collection,config.id(),limit-items.size()+1}:new Object[]{doc.id(),collection,config.id(),start,limit-items.size()+1});
+
       for(Unit u:units) {
         if(items.size()==limit) {more=true;break;}
-        Text t=textById.get(u.text());Map<String,Object> item=new LinkedHashMap<>();
-        item.put("indexation_id",config.id());item.put("profile_id",config.profile());item.put("unit_id",u.id());item.put("text_id",t.key());item.put("source_revision",u.sourceRevision());item.put("ordinal",u.ordinal());item.put("start_cp",u.start());item.put("end_cp",u.end());item.put("origin",u.origin());item.put("embedding",json(u.vector()));
-        if(includes.contains("texts")) {int textStart=t.content().offsetByCodePoints(0,u.start()),end=t.content().offsetByCodePoints(0,u.end());item.put("text",t.content().substring(textStart,end));var source=new LinkedHashMap<String,Object>();source.put("text_id",t.key());source.put("kind",t.kind());source.put("language",t.language());source.put("content",t.content());source.put("revision",t.revision());item.put("source_text",source);}
+        Map<String,Object> item=new LinkedHashMap<>();
+        item.put("indexation_id",config.id());item.put("profile_id",config.profile());item.put("unit_id",u.id());
+        if(u.embeddingKey()!=null)item.put("id",u.embeddingKey());else {item.put("ordinal",u.ordinal());item.put("start_cp",u.start());item.put("end_cp",u.end());}
+        item.put("origin",u.origin());item.put("embedding",json(u.vector()));
+        if(u.preparedText()!=null && includes.contains("texts")) item.put("text",u.preparedText());
         items.add(item);lastIndex=config.id();lastUnit=u.id();
       }
     }

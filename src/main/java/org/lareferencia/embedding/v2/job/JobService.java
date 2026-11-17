@@ -104,7 +104,7 @@ public class JobService {
   }
   private JobErrorResource errorResource(JobRepository.ItemError row) {
     ObjectNode safe=mapper.createObjectNode();
-    for(String name:List.of("line","byte_offset","record_ordinal","sequence_id","external_id","text_id","expected_revision"))
+    for(String name:List.of("line","byte_offset","record_ordinal","sequence_id","external_id","expected_revision"))
       if(row.locator().has(name) && row.locator().get(name).isValueNode()
           && row.locator().get(name).asText().length() <= 512) safe.set(name,row.locator().get(name));
     return new JobErrorResource(row.itemKey(),row.documentId(),safe,row.code(),"Item processing failed",row.attempts());

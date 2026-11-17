@@ -84,22 +84,22 @@ public class DocumentService {
 
     List<DocumentRepository.TextRow> oldTexts=repository.texts(document.id(),true);
     Map<String,DocumentRepository.TextRow> existing=new LinkedHashMap<>();
-    oldTexts.forEach(text->existing.put(text.textId(),text));
+    oldTexts.forEach(text->existing.put(text.key(),text));
     Map<String,SourceTextInput> desired=new LinkedHashMap<>();
-    if(!replace) oldTexts.forEach(text->desired.put(text.textId(),text.asInput()));
-    if(request.hasTexts()) request.texts().forEach(text->desired.put(text.textId(),text));
+    if(!replace) oldTexts.forEach(text->desired.put(text.key(),text.asInput()));
+    if(request.hasTexts()) request.texts().forEach(text->desired.put(text.key(),text));
     JsonNode metadata=request.hasMetadata()?request.metadata():document.metadata();
     validation.snapshot(metadata,desired.values());
     String metadataJson=toJson(metadata);
     boolean metadataChanged=request.hasMetadata() && repository.metadataDiffers(document.id(),metadataJson);
     boolean textsChanged=false;
     for(var old:oldTexts) {
-      SourceTextInput wanted=desired.get(old.textId());
+      SourceTextInput wanted=desired.get(old.key());
       if(wanted==null) { repository.deleteText(old.id());textsChanged=true; }
       else if(!sameText(old,wanted)) { repository.updateText(old,wanted,sha256(wanted.content()));textsChanged=true; }
     }
     for(var text:desired.values()) {
-      if(!existing.containsKey(text.textId())) { repository.insertText(document.id(),text,sha256(text.content()));textsChanged=true; }
+      if(!existing.containsKey(text.key())) { repository.insertText(document.id(),text,sha256(text.content()));textsChanged=true; }
     }
     boolean increment=!created && (metadataChanged || textsChanged);
     if(metadataChanged || increment) repository.updateDocument(document.id(),metadataJson,increment);
@@ -155,14 +155,21 @@ public class DocumentService {
   }
 
   public IdempotencyService.Result delete(String collection,String id,MultiValueMap<String,String> query,
-      String textId,String ifMatch,String key) {
+      boolean textRoute,String ifMatch,String key) {
     UUID c=uuid(collection),doc=uuid(id);
-    boolean textRoute=textId!=null;
-    requireQuery(query,textRoute?Set.of("text_id"):Set.of());
-    if(textRoute) { textId=required(query,"text_id",Set.of("text_id"));validation.textId(textId); }
+    requireQuery(query,textRoute?Set.of("knd","lng","ordinal"):Set.of());
+    String selectedText=null;
+    if(textRoute) {
+      String kind=query.getFirst("knd"),language=query.getFirst("lng"),ordinalValue=query.getFirst("ordinal");
+      if(kind==null || kind.isEmpty() || (language!=null && language.isEmpty())) throw V2Exception.badRequest("Invalid text selector");
+      int ordinal=0;
+      if(ordinalValue!=null) try { ordinal=Integer.parseInt(ordinalValue);if(ordinal<0 || !Integer.toString(ordinal).equals(ordinalValue)) throw new NumberFormatException(); }
+      catch(NumberFormatException e) { throw V2Exception.badRequest("Invalid text ordinal"); }
+      selectedText=DocumentWriteRequest.textKey(kind,language,ordinal);
+    }
     Long expected=Revisions.ifMatch(ifMatch);
     String path=base(c)+"/"+doc+(textRoute?"/texts":"");
-    String selectedText=textId;
+    String selectedKey=selectedText;
     Supplier<IdempotencyService.Result> action=()->{
       requireCollection(c,true);
       var found=repository.lockById(c,doc);
@@ -170,9 +177,9 @@ public class DocumentService {
       var document=found.orElseThrow(DocumentService::notFound);
       Revisions.requireMatch(expected,document.revision());
       var headers=new LinkedHashMap<String,String>();
-      if(selectedText==null) repository.deleteDocument(doc);
+      if(selectedKey==null) repository.deleteDocument(doc);
       else {
-        var text=repository.texts(doc,true).stream().filter(t->t.textId().equals(selectedText)).findFirst()
+        var text=repository.texts(doc,true).stream().filter(t->t.key().equals(selectedKey)).findFirst()
             .orElseThrow(()->new V2Exception(404,"text_not_found","Source text does not exist"));
         repository.deleteText(text.id());
         repository.updateDocument(doc,toJson(document.metadata()),true);

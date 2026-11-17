@@ -49,6 +49,8 @@ class ProfilesIntegrationTest {
   @Autowired @Qualifier("jdbcTemplate") JdbcTemplate jdbc;
   @Autowired @Qualifier("coordinationJdbc") JdbcTemplate coordination;
   @Autowired ProviderRegistry registry;
+  @Autowired ProfileService profiles;
+  @Autowired @Qualifier("writeTransactions") org.springframework.transaction.support.TransactionTemplate writes;
   private String request(String slug,String model,String mode,String provider,String preparation) {
     return "{\"slug\":\""+slug+"\",\"model\":\""+model+"\",\"model_revision\":\"deployment-v1\",\"dimensions\":3,\"execution_mode\":\""+mode+"\","+
         (provider==null?"":"\"provider_ref\":\""+provider+"\",")+"\"preparation\":"+preparation+"}";
@@ -125,4 +127,17 @@ class ProfilesIntegrationTest {
       call.get(5,TimeUnit.SECONDS);
     }
   }
+  @Test void inlineProfileResolutionIsAtomicAndRejectsConflictingIdentity() {
+    String slug="inline-"+UUID.randomUUID(),model="m-"+UUID.randomUUID();
+    var request=new ProfileRequest(slug,model,"v1",3,"import_only",null,new ProfileRequest.Preparation("identity-v1",null,null));
+    assertThrows(IllegalStateException.class,()->profiles.resolveForImport(request));
+    var created=writes.execute(tx->profiles.resolveForImport(request));
+    assertEquals(created.id(),writes.execute(tx->profiles.resolveForImport(request)).id());
+    var changed=new ProfileRequest(slug,"different-model","v1",3,"import_only",null,request.preparation());
+    assertEquals("profile_conflict",assertThrows(org.lareferencia.embedding.v2.common.V2Exception.class,()->writes.execute(tx->profiles.resolveForImport(changed))).code());
+    var rollback=new ProfileRequest("rollback-"+UUID.randomUUID(),"rollback-model-"+UUID.randomUUID(),"v1",3,"import_only",null,request.preparation());
+    assertThrows(RuntimeException.class,()->writes.execute(tx->{profiles.resolveForImport(rollback);throw new RuntimeException("rollback");}));
+    assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM dvp.embedding_profiles WHERE slug=?",Integer.class,rollback.slug()));
+  }
+
 }

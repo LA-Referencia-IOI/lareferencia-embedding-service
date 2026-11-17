@@ -27,28 +27,69 @@ public class IndexationService {
   }
   public IdempotencyService.Result create(String collection,JsonNode raw,String key,MultiValueMap<String,String> query) {
     requireQuery(query,Set.of());UUID c=uuid(collection);object(raw,Set.of("slug","profile_id","selection","chunking","metric","ann_strategy"));
-    String slug=text(raw,"slug",null);if(slug==null || !slug.matches("[a-z0-9][a-z0-9_-]{0,99}")) throw V2Exception.badRequest("Invalid slug");
+    var definition=definition(raw);
     UUID profile=uuid(text(raw,"profile_id",null));
-    String metric=text(raw,"metric","cosine"),strategy=text(raw,"ann_strategy","hnsw_vector");
-    if(!Set.of("cosine","l2","inner_product").contains(metric) || !Set.of("hnsw_vector","hnsw_halfvec","none").contains(strategy)) throw V2Exception.badRequest("Invalid metric or ANN strategy");
-    ObjectNode selection=selection(raw.get("selection")),chunking=chunking(raw.get("chunking"));
     String path=path(c);
     return idempotency.execute("POST "+path,key,canonical.requestHash(query,raw),()->{
       if(!exists(write,"SELECT EXISTS(SELECT 1 FROM dvp.collections WHERE id=?)",c)) throw new V2Exception(404,"collection_not_found","Collection does not exist");
       var dims=write.query("SELECT dimensions FROM dvp.embedding_profiles WHERE id=?",(rs,n)->rs.getInt(1),profile);
       if(dims.isEmpty()) throw new V2Exception(404,"profile_not_found","Profile does not exist");
-      if((strategy.equals("hnsw_vector") && dims.getFirst()>2000) || (strategy.equals("hnsw_halfvec") && dims.getFirst()>4000)) throw new V2Exception(422,"ann_dimensions_unsupported","Use an explicitly supported strategy for this dimension");
-      UUID id=UUID.randomUUID();String table=table(id);
-      int inserted=write.update("""
-        INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state)
-        VALUES (?,?,?,?,?::jsonb,?::jsonb,?,?,?,'provisioning',?) ON CONFLICT (collection_id,slug) DO NOTHING
-        """,id,c,slug,profile,selection.toString(),chunking.toString(),metric,strategy,table,strategy.equals("none")?"disabled":"pending");
+      validateDimensions(definition.strategy(),dims.getFirst());
+      UUID id=UUID.randomUUID();
+      int inserted=insert(c,profile,id,definition);
       if(inserted==0) throw new V2Exception(409,"indexation_exists","Index configuration slug already exists");
       var job=jobs.insert(UUID.randomUUID(),c,id,null,"maintenance",mapper.createObjectNode().put("operation","provision"));
       ObjectNode response=(ObjectNode)fetch(write,c,id);response.put("job_id",job.id().toString());
       return new IdempotencyService.Result(202,response,Map.of("Location",path+"/"+id),job.id());
     });
   }
+  /** Resolve or atomically create an inline import indexation in the caller's write transaction. */
+  public UUID resolveForImport(UUID collection,UUID profile,int dimensions,JsonNode raw) {
+    if(!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+        || org.springframework.transaction.support.TransactionSynchronizationManager.isCurrentTransactionReadOnly())
+      throw new IllegalStateException("An active write transaction is required");
+    object(raw,Set.of("slug","selection","chunking","metric","ann_strategy"));
+    var definition=definition(raw);
+    validateDimensions(definition.strategy(),dimensions);
+    if(!exists(write,"SELECT EXISTS(SELECT 1 FROM dvp.collections WHERE id=?)",collection))throw new V2Exception(404,"collection_not_found","Collection does not exist");
+    UUID id=UUID.randomUUID();
+    int inserted=insert(collection,profile,id,definition);
+    if(inserted==1) {
+      IndexTableProvisioner.create(write,id,table(id),dimensions);
+      write.update("UPDATE dvp.indexations SET state='ready' WHERE id=?",id);
+      return id;
+    }
+    var existing=write.query("SELECT id,profile_id,selection::text,chunking::text,metric,ann_strategy,state FROM dvp.indexations WHERE collection_id=? AND slug=?",(rs,n)->{
+      try {return new ImportIndex(rs.getObject(1,UUID.class),rs.getObject(2,UUID.class),mapper.readTree(rs.getString(3)),mapper.readTree(rs.getString(4)),rs.getString(5),rs.getString(6),rs.getString(7));}
+      catch(java.io.IOException e){throw new IllegalStateException("Invalid stored index configuration");}
+    },collection,definition.slug());
+    if(existing.isEmpty())throw new V2Exception(409,"indexation_conflict","Index configuration changed concurrently");
+    var match=existing.getFirst();if(!profile.equals(match.profile()) || !definition.selection().equals(match.selection()) || !definition.chunking().equals(match.chunking()) || !definition.metric().equals(match.metric()) || !definition.strategy().equals(match.strategy()))
+      throw new V2Exception(409,"indexation_conflict","Index configuration conflicts with an existing resource");
+    if(!"ready".equals(match.state()))throw new V2Exception(409,"indexation_unavailable","Index configuration is not ready");
+    return match.id();
+  }
+  private record Definition(String slug,ObjectNode selection,ObjectNode chunking,String metric,String strategy) { }
+  private Definition definition(JsonNode raw) {
+    String slug=text(raw,"slug",null);
+    if(slug==null || !slug.matches("[a-z0-9][a-z0-9_-]{0,99}")) throw V2Exception.badRequest("Invalid slug");
+    String metric=text(raw,"metric","cosine"),strategy=text(raw,"ann_strategy","hnsw_vector");
+    if(!Set.of("cosine","l2","inner_product").contains(metric) || !Set.of("hnsw_vector","hnsw_halfvec","none").contains(strategy))
+      throw V2Exception.badRequest("Invalid metric or ANN strategy");
+    return new Definition(slug,selection(raw.get("selection")),chunking(raw.get("chunking")),metric,strategy);
+  }
+  private static void validateDimensions(String strategy,int dimensions) {
+    if((strategy.equals("hnsw_vector") && dimensions>2000) || (strategy.equals("hnsw_halfvec") && dimensions>4000))
+      throw new V2Exception(422,"ann_dimensions_unsupported","Use an explicitly supported strategy for this dimension");
+  }
+  private int insert(UUID collection,UUID profile,UUID id,Definition definition) {
+    return write.update("""
+        INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state)
+        VALUES (?,?,?,?,?::jsonb,?::jsonb,?,?,?,'provisioning',?) ON CONFLICT (collection_id,slug) DO NOTHING
+        """,id,collection,definition.slug(),profile,definition.selection().toString(),definition.chunking().toString(),
+        definition.metric(),definition.strategy(),table(id),definition.strategy().equals("none")?"disabled":"pending");
+  }
+  private record ImportIndex(UUID id,UUID profile,JsonNode selection,JsonNode chunking,String metric,String strategy,String state) { }
   public IdempotencyService.Result maintenance(String collection,String id,JsonNode body,String key,MultiValueMap<String,String> query) {
     requireQuery(query,Set.of());UUID c=uuid(collection),i=uuid(id);object(body,Set.of("operation"));String operation=text(body,"operation",null);
     if(operation==null || !Set.of("reconcile","build_ann").contains(operation)) throw V2Exception.badRequest("Invalid maintenance operation");

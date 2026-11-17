@@ -72,17 +72,18 @@ public class DocumentController {
   public ResponseEntity<DocumentResponseBody> delete(@PathVariable String collection,@PathVariable String id,
       @RequestParam MultiValueMap<String,String> query,@RequestHeader(value="If-Match",required=false) String ifMatch,
       @RequestHeader(value="Idempotency-Key",required=false) String key) {
-    return response(service.delete(collection,id,query,null,ifMatch,key));
+    return response(service.delete(collection,id,query,false,ifMatch,key));
   }
   @DeleteMapping("/{id}/texts")
   @Operation(summary="Delete a source text and its representations")
-  @Parameter(name="text_id",in=ParameterIn.QUERY,required=true,description="Exact source-text key, URL encoded")
+  @Parameters({@Parameter(name="knd",in=ParameterIn.QUERY,required=true,description="Text kind"),
+      @Parameter(name="lng",in=ParameterIn.QUERY,description="Optional text language"),
+      @Parameter(name="ordinal",in=ParameterIn.QUERY,description="Zero-based occurrence within the kind and language",schema=@Schema(defaultValue="0",minimum="0"))})
   @ApiResponse(responseCode="204",description="Text deleted")
   public ResponseEntity<DocumentResponseBody> deleteText(@PathVariable String collection,@PathVariable String id,
       @RequestParam MultiValueMap<String,String> query,@RequestHeader(value="If-Match",required=false) String ifMatch,
       @RequestHeader(value="Idempotency-Key",required=false) String key) {
-    // A sentinel distinguishes this route even when text_id is missing; validation returns 400.
-    return response(service.delete(collection,id,query,"",ifMatch,key));
+    return response(service.delete(collection,id,query,true,ifMatch,key));
   }
   private ResponseEntity<DocumentResource> document(DocumentResource document) {
     return ResponseEntity.ok().eTag(Revisions.etag(document.revision())).body(document);

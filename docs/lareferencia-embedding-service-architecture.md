@@ -76,7 +76,8 @@ erDiagram
     COLLECTION ||--o{ INDEXATION : owns
     EMBEDDING_PROFILE ||--o{ INDEXATION : configures
     INDEXATION ||--o{ VECTOR_UNIT : prepares
-    SOURCE_TEXT ||--o{ VECTOR_UNIT : derives
+    SOURCE_TEXT o|--o{ VECTOR_UNIT : derives
+    DOCUMENT ||--o{ VECTOR_UNIT : owns
     VECTOR_UNIT ||--o| VECTOR_ROW : represents
     COLLECTION ||--o{ JOB : scopes
     JOB ||--o{ JOB_ITEM : tracks
@@ -84,15 +85,15 @@ erDiagram
 ```
 
 - A **collection** groups documents. Each document has an internal UUID, a collection-scoped exact `external_id`, metadata and a revision.
-- A **source text** has a document-scoped `text_id`, kind, optional language, content, SHA-256 and revision. Multiple texts can belong to one document.
+- A **source text** has kind, optional language, content, SHA-256 and revision. The public document representation uses `knd`, `lng`, and `cnt`; the service assigns an internal key for each kind/language occurrence. Multiple texts can belong to one document.
 - An immutable **embedding profile** specifies model, declared revision, dimensions, execution mode, provider reference and versioned preparation/prefixes. `http` profiles support inference; `import_only` profiles carry declared provenance but cannot call a provider.
 - An immutable **indexation** binds a collection and profile to selection, chunking, distance metric and ANN strategy. Each indexation has a UUID-derived `dvp.vec_*` table. `state` describes table provisioning; `ann_state` independently describes approximate-index readiness.
-- A **vector unit** identifies a selected whole text or chunk, its current source revision, code-point offsets, ordinal and prepared-input hash. A vector row refers back to its unit, source, document and indexation. The original source remains in `source_texts`; units do not duplicate source bodies.
+- A **vector unit** belongs to a document and indexation. Generated units store a prepared-text snapshot and hash; imported embeddings have an independent key. Neither representation references an individual source text.
 - **Jobs**, job items, idempotency records and import-file metadata are persisted in `dvp`. Long-running work is not held only in process memory.
 
-Static registry tables and constraints are owned by Flyway migrations V1–V4; dynamic per-store/per-indexation vector tables are provisioned by the application. Physical v2 table names are derived from UUIDs and checked before dynamic SQL. V2 vectors retain float32 values. A `hnsw_halfvec` index uses an explicit half-precision index expression and validation; it does not replace the stored float32 vector.
+Static registry tables and constraints are owned by Flyway migrations V1–V5; dynamic per-store/per-indexation vector tables are provisioned by the application. Physical v2 table names are derived from UUIDs and checked before dynamic SQL. V2 vectors retain float32 values. A `hnsw_halfvec` index uses an explicit half-precision index expression and validation; it does not replace the stored float32 vector.
 
-Document writes serialize changes on the document. Changing a text's content, kind or language advances its source/document revisions and invalidates the affected units and vectors; metadata-only changes preserve representations. Retrieval and search require current source revisions and use a bounded repeatable-read snapshot for data and optional projections. A snapshot is limited to one response; cursor pages do not share a transaction.
+Document writes serialize changes on the document. Existing vectors are retained after text changes and may become stale; a later generation can add representations for new content. Workers retain an input snapshot and recheck document changes while processing. Retrieval and search use a bounded repeatable-read snapshot; cursor pages do not share a transaction.
 
 ## 5. V2 lifecycle and processing
 
@@ -126,7 +127,7 @@ Document PATCH and PUT write metadata and source texts; they do not automaticall
 
 The multipart import path accepts JSON or JSONL. The API streams a bounded upload to an internally generated temporary file, hashes the original bytes, flushes the file, atomically publishes it and records the job/file metadata and idempotency response. It does not keep a database transaction open while uploading. Servlet multipart spooling may also consume temporary disk. The registered file is checked against recorded size and SHA-256 before processing; a bounded in-process file-stamp cache avoids rehashing unchanged files for every batch and is not a substitute for restricting write access to the import directory.
 
-The worker parses records incrementally. Each record's document, texts, supplied vectors, job counters and checkpoint are committed atomically under lease fencing. JSONL checkpoints use byte offset and line; JSON uses a record ordinal. Individual malformed JSONL records can fail while later records continue; globally malformed JSON requires correction and a new upload. Retry descendants reuse the original file and process failed locators. The importer does not call an embedding provider or verify the provenance claimed for externally supplied vectors.
+The worker parses records incrementally. Each record's document, texts, supplied vectors, job counters and checkpoint are committed atomically under lease fencing. JSONL checkpoints use byte offset and line; JSON uses a record ordinal. Individual malformed JSONL records can fail while later records continue; globally malformed JSON requires correction and a new upload. Retry descendants reuse the original file and process failed locators. The importer does not call an embedding provider or verify the provenance claimed for externally supplied vectors. An inline document-level format can supply full profile/indexation objects and independent `{id, vec}` embeddings. Missing resources and the physical table are created in the fenced record transaction; matching resources are reused and conflicting slugs fail the record. These vectors do not require text IDs or prepared-input hashes.
 
 Import files require durable storage shared by API and worker instances with atomic same-filesystem rename, directory fsync and cross-process file locking. Defaults include a 10 GiB file limit, 16 MiB record limit, 24-hour temporary/orphan threshold and at least 30 days after the latest terminal job in a retry chain. Active descendants and locked files are protected from cleanup. Actual deployment-volume semantics and large-file performance require separate validation.
 
@@ -183,7 +184,7 @@ The v2 readiness indicator checks pgvector compatibility and reports configurati
 
 Backups must preserve a consistent pair of the PostgreSQL data—including Flyway history, v1 tables, `dvp` registry, dynamic tables, jobs and checkpoints—and durable import files. Quiesce writes/uploads and workers or use a separately validated coordinated snapshot/PITR procedure. Restore to an isolated environment and verify extension, schema, dynamic tables, jobs and file checksums before resuming workers. Do not treat independently timed database and file snapshots as automatically consistent.
 
-Flyway migrations V1–V4 own the static schema; Hibernate validates the v1 entity schema. The active standalone configuration currently sets `spring.flyway.baseline-on-migrate=true` and `baseline-version=1`. On an existing nonempty database without Flyway history this can record a baseline automatically: inspect the actual schema, duplicate preflight and effective settings before startup, and rehearse on an authorized copy. For an application rollback, disable v2 traffic/workers and retain existing schema, data, tables, indexes and files; do not drop them as a routine rollback. A model, revision, preparation, dimension or metric change requires a new immutable profile/indexation and explicit generation or import, with an ANN build where applicable.
+Flyway migrations V1–V5 own the static schema; Hibernate validates the v1 entity schema. The active standalone configuration currently sets `spring.flyway.baseline-on-migrate=true` and `baseline-version=1`. On an existing nonempty database without Flyway history this can record a baseline automatically: inspect the actual schema, duplicate preflight and effective settings before startup, and rehearse on an authorized copy. For an application rollback, disable v2 traffic/workers and retain existing schema, data, tables, indexes and files; do not drop them as a routine rollback. An older application is not guaranteed to understand document-level vectors written after V5; a data rollback requires restoring a compatible database and import-volume backup together. A model, revision, preparation, dimension or metric change requires a new immutable profile/indexation and explicit generation or import, with an ANN build where applicable.
 
 ## 9. Verification and capacity limits
 

@@ -27,12 +27,7 @@ public class ProfileService {
   }
   public IdempotencyService.Result create(ProfileRequest raw,String key,MultiValueMap<String,String> query) {
     requireQuery(query,Set.of());ProfileRequest p=normalize(raw);
-    var recipe=mapper.createObjectNode().put("model",p.model()).put("model_revision",p.modelRevision())
-        .put("dimensions",p.dimensions()).put("execution_mode",p.executionMode());
-    if(p.providerRef()==null) recipe.putNull("provider_ref");else recipe.put("provider_ref",p.providerRef());
-    recipe.putObject("preparation").put("version",p.preparation().version())
-        .put("document_prefix",p.preparation().documentPrefix()).put("query_prefix",p.preparation().queryPrefix());
-    String fingerprint=canonical.hash(recipe);
+    String fingerprint=fingerprint(p);
     return idempotency.execute("POST "+PATH,key,canonical.requestHash(query,raw),()->{
       if("http".equals(p.executionMode()) && !providers.contains(p.providerRef()))
         throw new V2Exception(422,"unknown_provider","Provider reference is not configured");
@@ -45,6 +40,29 @@ public class ProfileService {
       var value=created.get();
       return new IdempotencyService.Result(201,mapper.valueToTree(value),Map.of("Location",PATH+"/"+value.id()),null);
     });
+  }
+  /** Resolve an inline import profile in the caller's atomic write transaction. */
+  public ProfileResource resolveForImport(ProfileRequest raw) {
+    if(!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+        || org.springframework.transaction.support.TransactionSynchronizationManager.isCurrentTransactionReadOnly())
+      throw new IllegalStateException("An active write transaction is required");
+    ProfileRequest p=normalize(raw);String fingerprint=fingerprint(p);
+    if("http".equals(p.executionMode()) && !providers.contains(p.providerRef()))
+      throw new V2Exception(422,"unknown_provider","Provider reference is not configured");
+    var created=repository.insert(p,fingerprint);if(created.isPresent())return created.get();
+    var existing=repository.duplicate(p.slug(),fingerprint)
+        .orElseThrow(()->new V2Exception(409,"profile_conflict","Profile conflicts with an existing resource"));
+    if(!existing.slug().equals(p.slug()) || !existing.fingerprint().equals(fingerprint))
+      throw new V2Exception(409,"profile_conflict","Profile conflicts with an existing resource");
+    return existing;
+  }
+  private String fingerprint(ProfileRequest p) {
+    var recipe=mapper.createObjectNode().put("model",p.model()).put("model_revision",p.modelRevision())
+        .put("dimensions",p.dimensions()).put("execution_mode",p.executionMode());
+    if(p.providerRef()==null) recipe.putNull("provider_ref");else recipe.put("provider_ref",p.providerRef());
+    recipe.putObject("preparation").put("version",p.preparation().version())
+        .put("document_prefix",p.preparation().documentPrefix()).put("query_prefix",p.preparation().queryPrefix());
+    return canonical.hash(recipe);
   }
   public ProfileRequest normalize(ProfileRequest p) {
     if(p==null || p.slug()==null || !p.slug().matches("[a-z0-9][a-z0-9_-]{0,99}")) throw V2Exception.badRequest("Invalid profile slug");

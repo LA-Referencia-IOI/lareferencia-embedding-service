@@ -31,12 +31,16 @@ class SearchIntegrationTest {
     jdbc.update("INSERT INTO dvp.collections(id,slug,name) VALUES (?,?,?)",c,"c-"+c,"test");
     jdbc.update("INSERT INTO dvp.embedding_profiles(id,slug,model,model_revision,dimensions,execution_mode,preparation,fingerprint) VALUES (?,?,'test','v1',2,'import_only','{\"version\":\"identity-v1\",\"document_prefix\":\"\",\"query_prefix\":\"\"}',?)",p,"p-"+p,p.toString().replace("-","").repeat(2));
     jdbc.update("INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state) VALUES (?,?,?,?,'{}','{\"mode\":\"none\"}',?,?,?,'ready',?)",i,c,"index",p,metric,strategy,table,strategy.equals("none")?"disabled":"ready");
-    jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY,document_id uuid NOT NULL,source_text_id uuid NOT NULL,source_revision bigint NOT NULL,indexation_id uuid NOT NULL,embedding vector(2) NOT NULL,origin varchar(10) NOT NULL)");
+    jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY,document_id uuid NOT NULL,indexation_id uuid NOT NULL,embedding vector(2) NOT NULL,origin varchar(10) NOT NULL)");
     if(!strategy.equals("none")) {String op=switch(metric){case "l2"->"l2";case "inner_product"->"ip";default->"cosine";};String expr=strategy.equals("hnsw_halfvec")?"(embedding::halfvec(2)) halfvec_"+op+"_ops":"embedding vector_"+op+"_ops";jdbc.execute("CREATE INDEX "+table+"_ann ON dvp."+table+" USING hnsw ("+expr+")");}
     return new Fixture(c,i,table);
   }
   UUID document(Fixture f,String external) {UUID d=UUID.randomUUID();jdbc.update("INSERT INTO dvp.documents(id,collection_id,external_id,metadata) VALUES (?,?,?,?::jsonb)",d,f.collection(),external,"{\"year\":2025}");return d;}
-  void unit(Fixture f,UUID d,int ordinal,String vector) {UUID t=UUID.randomUUID(),u=UUID.randomUUID();jdbc.update("INSERT INTO dvp.source_texts(id,document_id,text_key,kind,content,content_hash) VALUES (?,?,?,'abstract','hello',?)",t,d,"text-"+ordinal,"a".repeat(64));jdbc.update("INSERT INTO dvp.vector_units(id,collection_id,indexation_id,document_id,source_text_id,source_revision,ordinal,start_cp,end_cp,input_hash) VALUES (?,?,?,?,?,1,0,0,5,?)",u,f.collection(),f.index(),d,t,"b".repeat(64));jdbc.update("INSERT INTO dvp."+f.table()+" VALUES (?,?,?,?,?,?::vector,'generated')",u,d,t,1,f.index(),vector);}
+  void unit(Fixture f,UUID d,int ordinal,String vector) {
+    UUID u=UUID.randomUUID();
+    jdbc.update("INSERT INTO dvp.vector_units(id,collection_id,indexation_id,document_id,ordinal,start_cp,end_cp,input_hash,prepared_text,prepared_key) VALUES (?,?,?,?,0,0,5,?,'hello',?)",u,f.collection(),f.index(),d,"b".repeat(64),u.toString());
+    jdbc.update("INSERT INTO dvp."+f.table()+" VALUES (?,?,?,?::vector,'generated')",u,d,f.index(),vector);
+  }
   Map<String,Object> search(Fixture f,String json)throws Exception {return service.search(f.collection().toString(),f.index().toString(),mapper.readTree(json));}
   @Test void exactGroupsDocumentsBeforeLimitAndIncludesProjections() throws Exception {
     Fixture f=fixture("l2","hnsw_vector");UUID a=document(f,"a"),b=document(f,"b");unit(f,a,1,"[0.1,0]");unit(f,a,2,"[0.2,0]");unit(f,b,1,"[1,0]");
@@ -86,9 +90,7 @@ class SearchIntegrationTest {
     assertEquals("halfvec_not_representable",assertThrows(V2Exception.class,()->search(f,"{\"query\":{\"vector\":[70000,1]}} ")).code());
     assertEquals("halfvec_not_representable",assertThrows(V2Exception.class,()->search(f,"{\"query\":{\"vector\":[0.00000001,0]}} ")).code());
     assertEquals(1,((List<?>)search(f,"{\"query\":{\"vector\":[70000,1]},\"mode\":\"exact\"}").get("results")).size());
-    jdbc.update("UPDATE dvp.source_texts SET revision=2 WHERE document_id=?",d);
-    assertTrue(((List<?>)search(f,"{\"query\":{\"vector\":[1,0]},\"mode\":\"exact\"}").get("results")).isEmpty());
-    assertTrue(((List<?>)search(f,"{\"query\":{\"vector\":[1,0]}}").get("results")).isEmpty());
+    assertEquals(1,((List<?>)search(f,"{\"query\":{\"vector\":[1,0]},\"mode\":\"exact\"}").get("results")).size());
   }
 
   @Test void httpExactSearchAndMetricOrdering() throws Exception {
@@ -133,7 +135,6 @@ class SearchIntegrationTest {
       Map.entry("/api/v2/collections","post"),Map.entry("/api/v2/collections/{collection}/documents/by-external-id","patch"),
       Map.entry("/api/v2/embedding-profiles","post"),Map.entry("/api/v2/collections/{collection}/indexations","post"),
       Map.entry("/api/v2/collections/{collection}/indexations/{id}/maintenance-jobs","post"),
-      Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/preparation-jobs","post"),
       Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/generation-jobs","post"),
       Map.entry("/api/v2/collections/{collection}/imports","post"),Map.entry("/api/v2/jobs/{id}/retries","post"),
       Map.entry("/api/v2/collections/{collection}/documents/{document}/vectors","get"),
@@ -142,6 +143,7 @@ class SearchIntegrationTest {
       Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/document-vectors","get"),
       Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/search","post"));
     expected.forEach((path,method)->assertTrue(paths.path(path).has(method),"OpenAPI missing "+method+" "+path));
+    assertFalse(paths.has("/api/v2/collections/{collection}/indexations/{indexation}/preparation-jobs"));
   }
 
   @Test void openApiGroupsVersionsInSwaggerOrderAndUsesNewDocumentUrl() throws Exception {

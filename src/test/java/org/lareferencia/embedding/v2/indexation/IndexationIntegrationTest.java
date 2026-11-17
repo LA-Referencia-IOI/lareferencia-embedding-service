@@ -99,8 +99,8 @@ class IndexationIntegrationTest {
     run(UUID.fromString(created.path("job_id").asText()));UUID doc=UUID.randomUUID(),text=UUID.randomUUID(),unit=UUID.randomUUID();String hash="a".repeat(64);
     jdbc.update("INSERT INTO dvp.documents(id,collection_id,external_id) VALUES (?,?,'source')",doc,c);
     jdbc.update("INSERT INTO dvp.source_texts(id,document_id,text_key,kind,content,content_hash) VALUES (?,?,'t','abstract','a',?)",text,doc,hash);
-    jdbc.update("INSERT INTO dvp.vector_units(id,collection_id,indexation_id,document_id,source_text_id,source_revision,ordinal,start_cp,end_cp,input_hash) VALUES (?,?,?,?,?,1,0,0,1,?)",unit,c,i,doc,text,hash);
-    jdbc.update("INSERT INTO dvp."+IndexationService.table(i)+"(unit_id,document_id,source_text_id,source_revision,indexation_id,embedding,input_hash,origin) VALUES (?,?,?,1,?,'[0.000000001,0,0]'::vector,?,'imported')",unit,doc,text,i,hash);
+    jdbc.update("INSERT INTO dvp.vector_units(id,collection_id,indexation_id,document_id,ordinal,start_cp,end_cp,input_hash,prepared_text,prepared_key) VALUES (?,?,?,?,0,0,1,?,'a',?)",unit,c,i,doc,hash,unit.toString());
+    jdbc.update("INSERT INTO dvp."+IndexationService.table(i)+"(unit_id,document_id,indexation_id,embedding,input_hash,origin) VALUES (?,?,?,'[0.000000001,0,0]'::vector,?,'imported')",unit,doc,i,hash);
     var response=mvc.perform(post(path(c)+"/"+i+"/maintenance-jobs").header("Idempotency-Key","bad-half").contentType(MediaType.APPLICATION_JSON).content("{\"operation\":\"build_ann\"}")).andExpect(status().isAccepted()).andReturn();
     UUID job=UUID.fromString(mapper.readTree(response.getResponse().getContentAsString()).path("id").asText());
     var lease=jobs.claim("test-"+UUID.randomUUID(),java.util.Set.of("maintenance")).orElseThrow();assertEquals(job,lease.jobId());
@@ -152,8 +152,8 @@ class IndexationIntegrationTest {
     run(UUID.fromString(created.path("job_id").asText()));UUID doc=UUID.randomUUID(),text=UUID.randomUUID(),unit=UUID.randomUUID();String hash="b".repeat(64),table=IndexationService.table(i);
     jdbc.update("INSERT INTO dvp.documents(id,collection_id,external_id) VALUES (?,?,'source')",doc,c);
     jdbc.update("INSERT INTO dvp.source_texts(id,document_id,text_key,kind,content,content_hash) VALUES (?,?,'t','abstract','a',?)",text,doc,hash);
-    jdbc.update("INSERT INTO dvp.vector_units(id,collection_id,indexation_id,document_id,source_text_id,source_revision,ordinal,start_cp,end_cp,input_hash) VALUES (?,?,?,?,?,1,0,0,1,?)",unit,c,i,doc,text,hash);
-    jdbc.update("INSERT INTO dvp."+table+"(unit_id,document_id,source_text_id,source_revision,indexation_id,embedding,input_hash,origin) VALUES (?,?,?,1,?,'[70000,0,0]'::vector,?,'imported')",unit,doc,text,i,hash);
+    jdbc.update("INSERT INTO dvp.vector_units(id,collection_id,indexation_id,document_id,ordinal,start_cp,end_cp,input_hash,prepared_text,prepared_key) VALUES (?,?,?,?,0,0,1,?,'a',?)",unit,c,i,doc,hash,unit.toString());
+    jdbc.update("INSERT INTO dvp."+table+"(unit_id,document_id,indexation_id,embedding,input_hash,origin) VALUES (?,?,?,'[70000,0,0]'::vector,?,'imported')",unit,doc,i,hash);
     assertThrows(org.springframework.dao.DataAccessException.class,()->jdbc.execute("CREATE INDEX CONCURRENTLY "+table+"_ann ON dvp."+table+" USING hnsw ((embedding::halfvec(3)) halfvec_cosine_ops)"));
     assertFalse(jdbc.queryForObject("SELECT indisvalid FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE c.relname=?",Boolean.class,table+"_ann"));
     var response=mvc.perform(post(path(c)+"/"+i+"/maintenance-jobs").header("Idempotency-Key","invalid-reconcile").contentType(MediaType.APPLICATION_JSON).content("{\"operation\":\"reconcile\"}")).andExpect(status().isAccepted()).andReturn();
@@ -185,10 +185,10 @@ class IndexationIntegrationTest {
     UUID c=collection();JsonNode created=create(c,profile(3),"none",202);UUID i=UUID.fromString(created.path("id").asText());
     jdbc.update("UPDATE dvp.jobs SET status='failed' WHERE id=?",UUID.fromString(created.path("job_id").asText()));
     String table=IndexationService.table(i);
-    jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY,document_id uuid NOT NULL,source_text_id uuid NOT NULL,"
-        +"source_revision bigint NOT NULL,indexation_id uuid NOT NULL CHECK (indexation_id='"+i+"'::uuid OR true),embedding vector(3) NOT NULL,"
+    jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY,document_id uuid NOT NULL,"
+        +"indexation_id uuid NOT NULL CHECK (indexation_id='"+i+"'::uuid OR true),embedding vector(3) NOT NULL,"
         +"input_hash char(64) NOT NULL,origin varchar(10) NOT NULL,origin_job_id uuid,created_at timestamptz NOT NULL DEFAULT now(),"
-        +"FOREIGN KEY (unit_id,document_id,source_text_id,source_revision,indexation_id) REFERENCES dvp.vector_units(id,document_id,source_text_id,source_revision,indexation_id) ON DELETE CASCADE)");
+        +"FOREIGN KEY (unit_id,document_id,indexation_id) REFERENCES dvp.vector_units(id,document_id,indexation_id) ON DELETE CASCADE)");
     var response=mvc.perform(post(path(c)+"/"+i+"/maintenance-jobs").header("Idempotency-Key",UUID.randomUUID().toString())
         .contentType(MediaType.APPLICATION_JSON).content("{\"operation\":\"reconcile\"}")).andExpect(status().isAccepted()).andReturn();
     run(UUID.fromString(mapper.readTree(response.getResponse().getContentAsString()).path("id").asText()));
@@ -198,9 +198,9 @@ class IndexationIntegrationTest {
     UUID c=collection();JsonNode created=create(c,profile(3),"none",202);UUID i=UUID.fromString(created.path("id").asText());
     jdbc.update("UPDATE dvp.jobs SET status='failed' WHERE id=?",UUID.fromString(created.path("job_id").asText()));
     String table=IndexationService.table(i);
-    jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY,document_id uuid NOT NULL,source_text_id uuid NOT NULL,"
-        +"source_revision bigint NOT NULL,indexation_id uuid NOT NULL CHECK (indexation_id='"+i+"'::uuid),embedding vector(3) NOT NULL,"
-        +"FOREIGN KEY (unit_id,document_id,source_text_id,source_revision,indexation_id) REFERENCES dvp.vector_units(id,document_id,source_text_id,source_revision,indexation_id) ON DELETE CASCADE)");
+    jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY,document_id uuid NOT NULL,"
+        +"indexation_id uuid NOT NULL CHECK (indexation_id='"+i+"'::uuid),embedding vector(3) NOT NULL,"
+        +"FOREIGN KEY (unit_id,document_id,indexation_id) REFERENCES dvp.vector_units(id,document_id,indexation_id) ON DELETE CASCADE)");
     var response=mvc.perform(post(path(c)+"/"+i+"/maintenance-jobs").header("Idempotency-Key",UUID.randomUUID().toString())
         .contentType(MediaType.APPLICATION_JSON).content("{\"operation\":\"reconcile\"}")).andExpect(status().isAccepted()).andReturn();
     run(UUID.fromString(mapper.readTree(response.getResponse().getContentAsString()).path("id").asText()));
@@ -240,9 +240,9 @@ class IndexationIntegrationTest {
     UUID doc=UUID.randomUUID(),text=UUID.randomUUID(),unit=UUID.randomUUID();String hash="c".repeat(64);
     jdbc.update("INSERT INTO dvp.documents(id,collection_id,external_id) VALUES (?,?,'source')",doc,c1);
     jdbc.update("INSERT INTO dvp.source_texts(id,document_id,text_key,kind,content,content_hash) VALUES (?,?,'t','abstract','a',?)",text,doc,hash);
-    jdbc.update("INSERT INTO dvp.vector_units(id,collection_id,indexation_id,document_id,source_text_id,source_revision,ordinal,start_cp,end_cp,input_hash) VALUES (?,?,?,?,?,1,0,0,1,?)",unit,c1,i1,doc,text,hash);
+    jdbc.update("INSERT INTO dvp.vector_units(id,collection_id,indexation_id,document_id,ordinal,start_cp,end_cp,input_hash,prepared_text,prepared_key) VALUES (?,?,?,?,0,0,1,?,'a',?)",unit,c1,i1,doc,hash,unit.toString());
     assertThrows(org.springframework.dao.DataAccessException.class,()->jdbc.update("INSERT INTO dvp."+IndexationService.table(i2)
-        +"(unit_id,document_id,source_text_id,source_revision,indexation_id,embedding,input_hash,origin) VALUES (?,?,?,1,?,'[1,2,3]'::vector,?,'imported')",unit,doc,text,i2,hash));
+        +"(unit_id,document_id,indexation_id,embedding,input_hash,origin) VALUES (?,?,?,'[1,2,3]'::vector,?,'imported')",unit,doc,i2,hash));
     assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM dvp."+IndexationService.table(i2),Integer.class));
   }
   @Test void openApiDocumentsIndexationRequestsAndPagination() throws Exception {

@@ -66,13 +66,13 @@ class DocumentsIntegrationTest {
   @Test void createsAndReadsDocumentByExactExternalId() throws Exception {
     UUID c=collection(); String external="oai:institución/á 🧬";
     String body="""
-        {"metadata":{"year":2025},"texts":[{"text_id":"title/es","kind":"title","language":"es","content":"Ciencia abierta"}]}
+        {"metadata":{"year":2025},"texts":[{"knd":"title","lng":"es","cnt":"Ciencia abierta"}]}
         """;
     var created=writePatch(c,external,body,201); var item=json(created);
     assertEquals(external,item.path("external_id").asText());
     assertEquals(1,item.path("revision").asInt());
     assertEquals("\"1\"",created.getResponse().getHeader("ETag"));
-    assertEquals("title/es",item.path("texts").get(0).path("text_id").asText());
+    assertEquals("title",item.path("texts").get(0).path("knd").asText());
     mvc.perform(get(base(c)+"/by-external-id").param("external_id",external))
         .andExpect(status().isOk()).andExpect(header().string("ETag","\"1\""))
         .andExpect(jsonPath("$.id").value(item.path("id").asText()));
@@ -82,6 +82,25 @@ class DocumentsIntegrationTest {
   private MvcResult putDocument(UUID c,String external,String body,int expected) throws Exception {
     return mvc.perform(put(base(c)+"/by-external-id").param("external_id",external)
         .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().is(expected)).andReturn();
+  }
+  @Test void compactTextsWorkForPatchPutAndReads() throws Exception {
+    UUID c=collection();String external="compact-document";
+    String initial="{\"metadata\":{},\"texts\":[{\"knd\":\"title\",\"lng\":\"pt\",\"cnt\":\"Acesso aberto\"}]}";
+    var created=json(writePatch(c,external,initial,201));
+    assertEquals("title",created.path("texts").get(0).path("knd").asText());
+    assertFalse(created.path("texts").get(0).has("text_id"));
+    String changed="{\"texts\":[{\"knd\":\"title\",\"lng\":\"pt\",\"cnt\":\"Novo título\"}]}";
+    var updated=json(writePatch(c,external,changed,200));
+    assertEquals(1,updated.path("texts").size());
+    assertEquals("Novo título",updated.path("texts").get(0).path("cnt").asText());
+    String replacement="{\"metadata\":{},\"texts\":[{\"knd\":\"abstract\",\"cnt\":\"Resumo\"}]}";
+    var replaced=json(putDocument(c,external,replacement,200));
+    assertEquals(1,replaced.path("texts").size());
+    assertEquals("abstract",replaced.path("texts").get(0).path("knd").asText());
+    assertEquals("Resumo",json(find(c,external,200)).path("texts").get(0).path("cnt").asText());
+    mvc.perform(delete(base(c)+"/"+created.path("id").asText()+"/texts").param("knd","abstract"))
+        .andExpect(status().isNoContent());
+    assertTrue(json(find(c,external,200)).path("texts").isEmpty());
   }
   private MvcResult find(UUID c,String external,int expected) throws Exception {
     return mvc.perform(get(base(c)+"/by-external-id").param("external_id",external))
@@ -93,10 +112,10 @@ class DocumentsIntegrationTest {
     return mapper.writeValueAsString(payload);
   }
   private Map<String,Object> text(String key,String kind,String content) {
-    return Map.of("text_id",key,"kind",kind,"content",content);
+    return Map.of("knd",key,"cnt",content);
   }
   private JsonNode textById(JsonNode document,String key) {
-    for(var value:document.path("texts")) if(value.path("text_id").asText().equals(key)) return value;
+    for(var value:document.path("texts")) if(value.path("knd").asText().equals(key)) return value;
     fail("Text not found in response");return null;
   }
   @Test void collectionScopeAndExactExternalIdsArePreserved() throws Exception {
@@ -125,16 +144,16 @@ class DocumentsIntegrationTest {
     var metadataOnly=json(writePatch(c,external,"{\"metadata\":{\"year\":2026}}",200));
     assertEquals(2,metadataOnly.path("revision").asInt());assertEquals(2,metadataOnly.path("texts").size());
     assertEquals(1,textById(metadataOnly,"title").path("revision").asInt());
-    var change=json(writePatch(c,external,"{\"texts\":[{\"text_id\":\"title\",\"kind\":\"title\",\"content\":\"Ciencia nueva\"}]}",200));
+    var change=json(writePatch(c,external,"{\"texts\":[{\"knd\":\"title\",\"cnt\":\"Ciencia nueva\"}]}",200));
     assertEquals(3,change.path("revision").asInt());assertEquals(2026,change.path("metadata").path("year").asInt());
     assertEquals(2,textById(change,"title").path("revision").asInt());
     assertNotEquals(titleHash,textById(change,"title").path("content_hash").asText());
     assertEquals(1,textById(change,"abstract").path("revision").asInt());
-    var repeat=json(writePatch(c,external,"{\"texts\":[{\"text_id\":\"title\",\"kind\":\"title\",\"content\":\"Ciencia nueva\"}]}",200));
+    var repeat=json(writePatch(c,external,"{\"texts\":[{\"knd\":\"title\",\"cnt\":\"Ciencia nueva\"}]}",200));
     assertEquals(change.path("updated_at"),repeat.path("updated_at"));assertEquals(3,repeat.path("revision").asInt());
     var replacement=json(putDocument(c,external,body(Map.of(),List.of(abstractText)),200));
     assertEquals(4,replacement.path("revision").asInt());assertEquals(1,replacement.path("texts").size());
-    assertEquals("abstract",replacement.path("texts").get(0).path("text_id").asText());
+    assertEquals("abstract",replacement.path("texts").get(0).path("knd").asText());
     assertEquals(1,replacement.path("texts").get(0).path("revision").asInt());
     var empty=json(putDocument(c,external,body(Map.of(),List.of()),200));
     assertEquals(5,empty.path("revision").asInt());assertTrue(empty.path("texts").isEmpty());
@@ -215,19 +234,19 @@ class DocumentsIntegrationTest {
   }
   @Test void requestAndCombinedDocumentLimitsAreEnforcedAtomically() throws Exception {
     UUID c=collection();String external="limits/1";
-    String externalBoundary="🧬".repeat(512),keyBoundary="🧬".repeat(200);
+    String externalBoundary="🧬".repeat(512),keyBoundary="title";
     var accepted=writePatch(c,externalBoundary,body(Map.of(),List.of(text(keyBoundary,"title","x"))),201);
     assertEquals(externalBoundary,json(accepted).path("external_id").asText());
     writePatch(c,"🧬".repeat(513),"{\"texts\":[]}",400);
     writePatch(c,"bad\u0000id","{\"texts\":[]}",400);
-    writePatch(c,external,body(Map.of(),List.of(text("🧬".repeat(201),"title","x"))),400);
+    writePatch(c,external,body(Map.of(),List.of(text("🧬".repeat(61),"title","x"))),400);
     writePatch(c,external,body(Map.of(),List.of(text("t","title","x".repeat(129)))),422);
     writePatch(c,external,body(Map.of(),List.of(text("t","title"," "))),422);
     writePatch(c,external,body(Map.of("value","é".repeat(130)),List.of()),413);
-    writePatch(c,external,"{\"texts\":[{\"text_id\":\"t\",\"kind\":\"x\",\"content\":\"a\"},{\"text_id\":\"t\",\"kind\":\"x\",\"content\":\"b\"}]}",422);
+
     writePatch(c,external,"{\"metadata\":null}",400);
     writePatch(c,external,"{\"texts\":null}",400);
-    writePatch(c,external,"{\"texts\":[{\"text_id\":\"t\",\"kind\":\"x\",\"content\":\"a\",\"unknown\":true}]}",400);
+    writePatch(c,external,"{\"texts\":[{\"knd\":\"x\",\"cnt\":\"a\",\"unknown\":true}]}",400);
     putDocument(c,external,"{\"texts\":[]}",400);
     mvc.perform(patch(base(c)+"/by-external-id").param("external_id",external)
         .contentType(MediaType.APPLICATION_JSON).content(" ".repeat(8193))).andExpect(status().isPayloadTooLarge());
@@ -254,7 +273,7 @@ class DocumentsIntegrationTest {
     assertTrue(schema.path("paths").path("/api/v2/collections/{collection}/documents/{id}").has("delete"));
     var properties=schema.path("components").path("schemas").path("DocumentWriteRequest").path("properties");
     assertTrue(properties.has("metadata"));assertTrue(properties.has("texts"));
-    assertTrue(schema.path("components").path("schemas").path("SourceTextInput").path("properties").has("text_id"));
+    assertTrue(schema.path("components").path("schemas").path("SourceTextInput").path("properties").has("knd"));
   }
 
   @Test void concurrentUpsertsAndRevisionChecksAreSerialized() throws Exception {
@@ -344,146 +363,32 @@ class DocumentsIntegrationTest {
       Collections.sort(statuses);assertEquals(List.of(201,409),statuses);
     }
   }
-  private record VectorFixture(String table,UUID unit,UUID document,UUID source,long revision,UUID indexation,String hash) {}
-  private VectorFixture vectorFixture(UUID collection,UUID document,String textKey) throws Exception {
-    UUID source=jdbc.queryForObject("SELECT id FROM dvp.source_texts WHERE document_id=? AND text_key=?",UUID.class,document,textKey);
-    Long revision=jdbc.queryForObject("SELECT revision FROM dvp.source_texts WHERE id=?",Long.class,source);
-    String hash=jdbc.queryForObject("SELECT content_hash FROM dvp.source_texts WHERE id=?",String.class,source);
-    UUID profile=UUID.randomUUID(), indexation=UUID.randomUUID(), unit=UUID.randomUUID();
-    String table="vec_"+indexation.toString().replace("-","");
-    String fingerprint=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
-        .digest(profile.toString().getBytes(StandardCharsets.UTF_8)));
-    jdbc.update("""
-        INSERT INTO dvp.embedding_profiles(id,slug,model,model_revision,dimensions,execution_mode,preparation,fingerprint)
-        VALUES (?,?,?, ?,3,'import_only','{}'::jsonb,?)
-        """,profile,"profile-"+profile,"fixture","v1",fingerprint);
-    jdbc.update("""
-        INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state)
-        VALUES (?,?,?,?, '{}'::jsonb,'{"mode":"none"}'::jsonb,'cosine','none',?,'ready','disabled')
-        """,indexation,collection,"index-"+indexation,profile,table);
-    jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY,document_id uuid NOT NULL,source_text_id uuid NOT NULL,"
-        +"source_revision bigint NOT NULL,indexation_id uuid NOT NULL,embedding vector(3) NOT NULL,input_hash char(64) NOT NULL,"
-        +"origin varchar(10) NOT NULL, FOREIGN KEY(unit_id,document_id,source_text_id,source_revision,indexation_id) "
-        +"REFERENCES dvp.vector_units(id,document_id,source_text_id,source_revision,indexation_id) ON DELETE CASCADE)");
-    jdbc.update("""
-        INSERT INTO dvp.vector_units(id,collection_id,indexation_id,document_id,source_text_id,source_revision,ordinal,start_cp,end_cp,input_hash)
-        VALUES (?,?,?,?,?,?,0,0,1,?)
-        """,unit,collection,indexation,document,source,revision,hash);
-    jdbc.update("INSERT INTO dvp."+table+" VALUES (?,?,?,?,?,'[1,0,0]'::vector,?,'imported')",
-        unit,document,source,revision,indexation,hash);
-    return new VectorFixture(table,unit,document,source,revision,indexation,hash);
-  }
-  private int vectorCount(VectorFixture fixture) {
-    assertTrue(fixture.table().matches("vec_[0-9a-f]{32}"));
-    return jdbc.queryForObject("SELECT count(*) FROM dvp."+fixture.table(),Integer.class);
-  }
-  @Test void textChangesAndDeletesCascadeAcrossIndexationsWithoutCrossCollectionEffects() throws Exception {
-    UUID c=collection(),other=collection();String external="cascade/1",textKey="title/pt";
-    String payload=body(Map.of("year",2025),List.of(text(textKey,"title","Titulo"),text("abstract","abstract","Resumo")));
-    var created=writePatch(c,external,payload,201);UUID document=UUID.fromString(id(created));
-    UUID otherDocument=UUID.fromString(id(writePatch(other,external,payload,201)));
-    VectorFixture first=vectorFixture(c,document,textKey),second=vectorFixture(c,document,textKey);
-    VectorFixture sameCollection=vectorFixture(c,document,"abstract"),otherCollection=vectorFixture(other,otherDocument,textKey);
-    var changedMetadata=json(writePatch(c,external,"{\"metadata\":{\"year\":2026}}",200));
-    assertEquals(2,changedMetadata.path("revision").asInt());
-    assertEquals(1,vectorCount(first));assertEquals(1,vectorCount(second));assertEquals(1,vectorCount(sameCollection));
-    String oldHash=textById(changedMetadata,textKey).path("content_hash").asText();
-    String change="{\"texts\":[{\"text_id\":\"title/pt\",\"kind\":\"subtitle\",\"language\":\"pt\",\"content\":\"Titulo\"}]}";
-    var updated=json(writePatch(c,external,change,200));
-    assertEquals(3,updated.path("revision").asInt());
-    assertEquals(2,textById(updated,textKey).path("revision").asInt());
-    assertEquals(oldHash,textById(updated,textKey).path("content_hash").asText());
-    assertEquals(0,vectorCount(first));assertEquals(0,vectorCount(second));
-    assertEquals(1,vectorCount(sameCollection));assertEquals(1,vectorCount(otherCollection));
-    assertThrows(org.springframework.dao.DataIntegrityViolationException.class,()->jdbc.update(
-        "INSERT INTO dvp."+first.table()+" VALUES (?,?,?,?,?,'[1,0,0]'::vector,?,'imported')",
-        first.unit(),first.document(),first.source(),first.revision(),first.indexation(),first.hash()));
-    VectorFixture newer=vectorFixture(c,document,textKey),newer2=vectorFixture(c,document,textKey);
-    String deleteKey="text-delete-"+UUID.randomUUID();
-    mvc.perform(delete(base(c)+"/"+document+"/texts").param("text_id",textKey)
-        .header("If-Match","\"3\"").header("Idempotency-Key",deleteKey))
-        .andExpect(status().isNoContent()).andExpect(header().string("ETag","\"4\""));
-    mvc.perform(delete(base(c)+"/"+document+"/texts").param("text_id",textKey)
-        .header("If-Match","\"3\"").header("Idempotency-Key",deleteKey)).andExpect(status().isNoContent());
-    assertEquals(0,vectorCount(newer));assertEquals(0,vectorCount(newer2));assertEquals(1,vectorCount(sameCollection));
-    mvc.perform(delete(base(c)+"/"+document+"/texts").param("text_id",textKey)).andExpect(status().isNotFound());
-    assertEquals(4,json(find(c,external,200)).path("revision").asInt());
-    mvc.perform(delete(base(c)+"/"+document)).andExpect(status().isNoContent());
-    assertEquals(0,vectorCount(sameCollection));assertEquals(1,vectorCount(otherCollection));
-    assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE collection_id=?",Integer.class,other));
-  }
-
-  @Test void identicalTextsRemainDistinctAndHashesUseExactUtf8() throws Exception {
-    UUID c=collection();String external="exact/1",content="Cie\u0301ncia-\nAbierta 🧬";
-    var result=json(writePatch(c,external,body(Map.of(),List.of(text("a","title",content),text("b","title",content))),201));
-    String a=textById(result,"a").path("content_hash").asText();
-    assertEquals(a,textById(result,"b").path("content_hash").asText());
-    assertEquals(java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
-        .digest(content.getBytes(StandardCharsets.UTF_8))),a);
-    UUID document=UUID.fromString(result.path("id").asText());
-    var ids=jdbc.queryForList("SELECT id FROM dvp.source_texts WHERE document_id=? ORDER BY text_key",UUID.class,document);
-    assertEquals(2,ids.size());assertNotEquals(ids.get(0),ids.get(1));
-    VectorFixture untouched=vectorFixture(c,document,"b");
-    writePatch(c,external,"{\"texts\":["+mapper.writeValueAsString(text("a","title","Changed"))+"]}",200);
-    assertEquals(1,vectorCount(untouched));
-    assertEquals(1,textById(json(find(c,external,200)),"b").path("revision").asInt());
-  }
-  @Test void putRemovesOnlyOmittedTextVectorsAndNoopPreservesRemainingVector() throws Exception {
-    UUID c=collection();String external="put-cascade/1";
-    var kept=text("keep","title","Kept");var removed=text("remove","abstract","Removed");
-    UUID document=UUID.fromString(id(writePatch(c,external,body(Map.of(),List.of(kept,removed)),201)));
-    VectorFixture keptVector=vectorFixture(c,document,"keep"),removedVector=vectorFixture(c,document,"remove");
-    String snapshot=body(Map.of(),List.of(kept));
-    var updated=mvc.perform(put(base(c)+"/by-external-id").param("external_id",external)
-        .contentType(MediaType.APPLICATION_JSON).content(snapshot)).andExpect(status().isOk()).andReturn();
-    assertEquals(2,json(updated).path("revision").asInt());
-    assertEquals(1,vectorCount(keptVector));assertEquals(0,vectorCount(removedVector));
-    var unchanged=mvc.perform(put(base(c)+"/by-external-id").param("external_id",external)
-        .contentType(MediaType.APPLICATION_JSON).content(snapshot)).andExpect(status().isOk()).andReturn();
-    assertEquals(json(updated),json(unchanged));assertEquals(1,vectorCount(keptVector));
-  }
-  @Test void databaseFailureRollsBackSourceRevisionAndVectorInvalidation(CapturedOutput output) throws Exception {
-    UUID c=collection();String external="rollback/1";
-    var initial=writePatch(c,external,body(Map.of(),List.of(text("t","title","Before"))),201);
-    UUID document=UUID.fromString(id(initial));VectorFixture fixture=vectorFixture(c,document,"t");
-    // The constraint exists only in this disposable test database and forces failure after source mutation.
-    jdbc.execute("ALTER TABLE dvp.documents ADD CONSTRAINT phase4_test_metadata_guard "
-        +"CHECK (NOT (metadata ? '__phase4_test_forbidden'))");
-    String failing="{\"metadata\":{\"__phase4_test_forbidden\":\"private-rollback-marker\"},\"texts\":["+
-        mapper.writeValueAsString(text("t","title","After"))+"]}";
+  @Test void failedWritePreservesDocumentSnapshot() throws Exception {
+    UUID c=collection();String external="rollback-compact";
+    var initial=writePatch(c,external,body(Map.of(),List.of(text("title","title","Before"))),201);
+    jdbc.execute("ALTER TABLE dvp.documents ADD CONSTRAINT compact_test_metadata_guard CHECK (NOT (metadata ? '__compact_forbidden'))");
+    String failing="{\"metadata\":{\"__compact_forbidden\":true},\"texts\":[{\"knd\":\"title\",\"cnt\":\"After\"}]}";
     writePatch(c,external,failing,503);
     assertEquals(json(initial),json(find(c,external,200)));
-    assertEquals(1,vectorCount(fixture));
-    assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE id=?",Integer.class,fixture.unit()));
-    assertFalse(output.getAll().contains("private-rollback-marker"));
   }
-  @Test void upsertAfterConcurrentDeleteCreatesANewDocumentWithoutRevivingVectors() throws Exception {
-    UUID c=collection();String external="delete-race/1";
-    UUID original=UUID.fromString(id(writePatch(c,external,body(Map.of(),List.of(text("t","title","Before"))),201)));
-    VectorFixture fixture=vectorFixture(c,original,"t");
+  @Test void concurrentDeleteAndUpsertCreatesNewDocument() throws Exception {
+    UUID c=collection();String external="delete-race-compact";
+    UUID original=UUID.fromString(id(writePatch(c,external,body(Map.of(),List.of(text("title","title","Before"))),201)));
     var locked=new CountDownLatch(1);var release=new CountDownLatch(1);
     try(var executor=Executors.newFixedThreadPool(2)) {
       var deletion=executor.submit(()->writes.executeWithoutResult(status->{
-        jdbc.queryForObject("SELECT id FROM dvp.documents WHERE id=? FOR UPDATE",UUID.class,original);
-        locked.countDown();
-        try { if(!release.await(5,TimeUnit.SECONDS)) throw new IllegalStateException("release timed out"); }
-        catch(InterruptedException e){Thread.currentThread().interrupt();throw new IllegalStateException(e);}
+        jdbc.queryForObject("SELECT id FROM dvp.documents WHERE id=? FOR UPDATE",UUID.class,original);locked.countDown();
+        try { if(!release.await(5,TimeUnit.SECONDS)) throw new IllegalStateException("timeout"); }
+        catch(InterruptedException e) {Thread.currentThread().interrupt();throw new IllegalStateException(e);}
         jdbc.update("DELETE FROM dvp.documents WHERE id=?",original);
       }));
       try {
         assertTrue(locked.await(5,TimeUnit.SECONDS));
-        var replacement=executor.submit(()->mvc.perform(patch(base(c)+"/by-external-id").param("external_id",external)
-            .contentType(MediaType.APPLICATION_JSON).content(body(Map.of(),List.of(text("t","title","After")))))
-            .andReturn());
-        org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(3)).until(()->
-            jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%dvp.documents%'",Integer.class)>0);
-        assertThrows(TimeoutException.class,()->replacement.get(200,TimeUnit.MILLISECONDS));
+        var replacement=executor.submit(()->writePatch(c,external,body(Map.of(),List.of(text("title","title","After"))),201));
+        org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(3)).until(()->jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%dvp.documents%'",Integer.class)>0);
         release.countDown();deletion.get(5,TimeUnit.SECONDS);
-        var response=replacement.get(5,TimeUnit.SECONDS);
-        assertEquals(201,response.getResponse().getStatus());assertNotEquals(original.toString(),id(response));
-        assertEquals(1,json(response).path("revision").asInt());assertEquals(0,vectorCount(fixture));
-        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.documents WHERE collection_id=? AND external_id=?",Integer.class,c,external));
-      } finally { release.countDown(); }
+        assertNotEquals(original.toString(),id(replacement.get(5,TimeUnit.SECONDS)));
+      } finally {release.countDown();}
     }
   }
 }

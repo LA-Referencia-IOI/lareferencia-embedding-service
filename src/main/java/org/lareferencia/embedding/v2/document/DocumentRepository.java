@@ -20,11 +20,11 @@ public class DocumentRepository {
       long revision,Instant createdAt,Instant updatedAt) {
     @Override public String toString() { return "DocumentRow[redacted]"; }
   }
-  public record TextRow(UUID id,String textId,String kind,String language,String content,String contentHash,
+  public record TextRow(UUID id,String key,String kind,String language,String content,String contentHash,
       long revision,Instant updatedAt) {
     @Override public String toString() { return "TextRow[redacted]"; }
-    SourceTextInput asInput() { return new SourceTextInput(textId,kind,language,content); }
-    SourceTextResource resource() { return new SourceTextResource(textId,kind,language,content,revision,contentHash,updatedAt); }
+    SourceTextInput asInput() { return new SourceTextInput(key,kind,language,content); }
+    SourceTextResource resource() { return new SourceTextResource(kind,language,content,revision,contentHash,updatedAt); }
   }
   private final JdbcTemplate write;
   private final JdbcTemplate read;
@@ -95,11 +95,9 @@ public class DocumentRepository {
     write.update("""
         INSERT INTO dvp.source_texts(id,document_id,text_key,kind,language,content,content_hash)
         VALUES (?,?,?,?,?,?,?)
-        """,UUID.randomUUID(),documentId,text.textId(),text.kind(),text.language(),text.content(),hash);
+        """,UUID.randomUUID(),documentId,text.key(),text.kind(),text.language(),text.content(),hash);
   }
   public void updateText(TextRow original,SourceTextInput text,String hash) {
-    // The parent document lock is already held; delete all derived units before changing the source.
-    write.update("DELETE FROM dvp.vector_units WHERE source_text_id=?",original.id());
     write.update("""
         UPDATE dvp.source_texts SET kind=?,language=?,content=?,content_hash=?,revision=revision+1,updated_at=clock_timestamp()
         WHERE id=?

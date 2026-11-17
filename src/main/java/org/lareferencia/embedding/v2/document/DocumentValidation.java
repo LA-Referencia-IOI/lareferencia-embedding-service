@@ -17,7 +17,7 @@ public class DocumentValidation {
   }
 
   public void externalId(String value) { identifier(value,512,2048,"external_id"); }
-  public void textId(String value) { identifier(value,200,800,"text_id"); }
+  public void embeddingId(String value) { identifier(value,200,800,"embedding id"); }
 
   private void identifier(String value,int maxPoints,int maxBytes,String name) {
     if(value==null || value.isEmpty() || !validUnicode(value) || value.codePointCount(0,value.length())>maxPoints
@@ -45,8 +45,8 @@ public class DocumentValidation {
       var keys=new HashSet<String>();
       for(var text:request.texts()) {
         if(text==null) throw V2Exception.badRequest("Every text must be an object");
-        textId(text.textId());
-        if(!keys.add(text.textId())) throw new V2Exception(422,"duplicate_text_id","Text keys must be unique within a document");
+        identifier(text.key(),200,800,"text key");
+        if(!keys.add(text.key())) throw new V2Exception(422,"duplicate_text","Text keys must be unique within a document");
         if(text.kind()==null || !validUnicode(text.kind()) || points(text.kind())>60)
           throw V2Exception.badRequest("kind must be a string of at most 60 code points without NUL");
         if(text.language()!=null && (!validUnicode(text.language()) || points(text.language())>35))

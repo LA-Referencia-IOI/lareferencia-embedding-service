@@ -77,17 +77,7 @@ public class IndexMaintenanceHandler implements JobHandler {
   private void provision(JobRepository.Lease lease,Index x) {
     writes.executeWithoutResult(tx->{fence(lease);
       if(!"provisioning".equals(x.state())) throw new IllegalStateException("Index configuration is not provisioning");
-      write.execute("""
-        CREATE TABLE dvp.%s (unit_id uuid PRIMARY KEY,document_id uuid NOT NULL,source_text_id uuid NOT NULL,
-          source_revision bigint NOT NULL,indexation_id uuid NOT NULL CHECK (indexation_id='%s'::uuid),
-          embedding vector(%d) NOT NULL,input_hash char(64) NOT NULL,
-          origin varchar(10) NOT NULL CHECK (origin IN ('generated','imported','reused')),origin_job_id uuid,
-          created_at timestamptz NOT NULL DEFAULT now(),
-          FOREIGN KEY (unit_id,document_id,source_text_id,source_revision,indexation_id)
-          REFERENCES dvp.vector_units(id,document_id,source_text_id,source_revision,indexation_id) ON DELETE CASCADE)
-        """.formatted(x.table(),x.id(),x.dims()));
-      write.execute("CREATE INDEX "+x.table()+"_doc ON dvp."+x.table()+"(document_id,unit_id)");
-      write.execute("CREATE INDEX "+x.table()+"_hash ON dvp."+x.table()+"(input_hash)");
+      IndexTableProvisioner.create(write,x.id(),x.table(),x.dims());
       fence(lease);write.update("UPDATE dvp.indexations SET state='ready' WHERE id=?",x.id());complete(lease);
     });
   }
@@ -97,21 +87,20 @@ public class IndexMaintenanceHandler implements JobHandler {
          JOIN pg_attribute a ON a.attrelid=t.oid AND a.attname='embedding' AND NOT a.attisdropped
          WHERE n.nspname='dvp' AND t.relname=? AND t.relkind='r' AND format_type(a.atttypid,a.atttypmod)=?
          AND NOT EXISTS (SELECT 1 FROM (VALUES
-           ('unit_id','uuid',true),('document_id','uuid',true),('source_text_id','uuid',true),
-           ('source_revision','bigint',true),('indexation_id','uuid',true),('embedding',?,true),
-           ('input_hash','character(64)',true),('origin','character varying(10)',true),
+           ('unit_id','uuid',true),('document_id','uuid',true),
+           ('indexation_id','uuid',true),('embedding',?,true),
+           ('input_hash','character(64)',false),('origin','character varying(10)',true),
            ('origin_job_id','uuid',false),('created_at','timestamp with time zone',true)
          ) expected(name,datatype,required) WHERE NOT EXISTS
            (SELECT 1 FROM pg_attribute col WHERE col.attrelid=t.oid AND col.attname=expected.name
              AND NOT col.attisdropped AND format_type(col.atttypid,col.atttypmod)=expected.datatype
              AND (NOT expected.required OR col.attnotnull)))
          AND EXISTS(SELECT 1 FROM pg_constraint fk WHERE fk.conrelid=t.oid AND fk.contype='f'
-           AND fk.confrelid='dvp.vector_units'::regclass AND fk.convalidated
-           AND fk.confdeltype='c'
+           AND fk.confrelid='dvp.vector_units'::regclass AND fk.convalidated AND fk.confdeltype='c'
            AND (SELECT array_agg(a.attname::text ORDER BY k.n) FROM unnest(fk.conkey) WITH ORDINALITY k(attnum,n)
-             JOIN pg_attribute a ON a.attrelid=fk.conrelid AND a.attnum=k.attnum)=ARRAY['unit_id','document_id','source_text_id','source_revision','indexation_id']
+             JOIN pg_attribute a ON a.attrelid=fk.conrelid AND a.attnum=k.attnum)=ARRAY['unit_id','document_id','indexation_id']
            AND (SELECT array_agg(a.attname::text ORDER BY k.n) FROM unnest(fk.confkey) WITH ORDINALITY k(attnum,n)
-             JOIN pg_attribute a ON a.attrelid=fk.confrelid AND a.attnum=k.attnum)=ARRAY['id','document_id','source_text_id','source_revision','indexation_id'])
+             JOIN pg_attribute a ON a.attrelid=fk.confrelid AND a.attnum=k.attnum)=ARRAY['id','document_id','indexation_id'])
          AND EXISTS(SELECT 1 FROM pg_constraint pk WHERE pk.conrelid=t.oid AND pk.contype='p'
            AND pg_get_constraintdef(pk.oid)='PRIMARY KEY (unit_id)')
          AND EXISTS(SELECT 1 FROM pg_constraint ck WHERE ck.conrelid=t.oid AND ck.contype='c'

@@ -1,20 +1,21 @@
 # Document-to-vector workflows
 
-This document contains two complete API v2 workflows. Each step is numbered and lists its prerequisites and expected result:
+This document contains three complete API v2 workflows. Each step is numbered and lists its prerequisites and expected result:
 
 1. [Create documents through the API](#workflow-1--documents-created-through-the-api).
 2. [Import documents from JSON or JSONL](#workflow-2--documents-imported-from-json-or-jsonl).
+3. [Import documents with embeddings](#workflow-3--documents-imported-with-embeddings).
 
-The workflows create separate collections and can reuse the same immutable embedding profile. Commands are examples; run them only against an environment you are authorized to use. The documents, IDs, vectors and responses shown are illustrative.
+The workflows create separate collections. Workflows 1 and 2 can reuse the same immutable HTTP embedding profile; workflow 3 uses an import-only profile. Commands are examples; run them only against an environment you are authorized to use. The documents, IDs, vectors and responses shown are illustrative.
 
 ## Common prerequisites
 
-Before starting either workflow:
+Before starting a workflow:
 
 - The application is running at `http://localhost:8989` with PostgreSQL and pgvector >= 0.8.0 available. The API process has `DVP_ENABLED=true` and role `API` or `ALL`.
 - A worker-capable process has `DVP_ENABLED=true`, `DVP_WORKERS_ENABLED=true`, and role `WORKER` or `ALL`. A 202 response only queues work; wait for the job before using its result.
 - For generation and text search, a configured HTTP provider is reachable and authorized to receive the texts. The examples use the existing provider reference `ollama-gpu-ibict`, model `bge-m3`, and 1024 dimensions; verify that your provider actually serves this model and dimension. Adjust the reference, model and declared revision to match your environment. `provider_ref` is a configured name, not a URL.
-- For workflow 2, `DVP_IMPORT_ENABLED=true` is set on both the API and worker. Their import directory is shared and durable and supports atomic rename, directory fsync and cross-process locks. The supplied Compose volume is local to its Docker host.
+- For workflows 2 and 3, `DVP_IMPORT_ENABLED=true` is set on both the API and worker. Their import directory is shared and durable and supports atomic rename, directory fsync and cross-process locks. The supplied Compose volume is local to its Docker host.
 - Replace every `<...>` placeholder with the UUID or value returned by your server. Example JSON responses below show relevant fields; real responses can include additional fields.
 - `Idempotency-Key` is mandatory for collection, profile, indexation, import, generation and maintenance creation. Reusing a key with the same request replays the original response; use a **new key** for a new operation or a later generation run. Choose unused collection/indexation slugs and keys when repeating these examples.
 
@@ -24,7 +25,7 @@ Set the base URL in your shell:
 BASE=http://localhost:8989
 ```
 
-**Profile choice:** both workflows require a profile before indexation creation. You may use an existing compatible HTTP profile and set `P` to its UUID. Otherwise create the profile in the relevant workflow. Profiles are immutable and unique by slug or fingerprint; if creation returns `profile_exists`, inspect the existing profile and reuse it only if its configuration is appropriate. Do not change model weights or revision in place.
+**Profile choice:** workflows 1 and 2 require an HTTP profile before indexation creation. You may use an existing compatible profile and set `P` to its UUID. Otherwise create the profile in the relevant workflow. Workflow 3 supplies a profile and indexation in the import record, allowing the service to create or reuse them. Profiles are immutable and unique by slug or fingerprint; if creation returns `profile_exists`, inspect the existing profile and reuse it only if its configuration is appropriate. Do not change model weights or revision in place.
 
 ---
 
@@ -49,12 +50,12 @@ C='<COLLECTION_UUID_FROM_STEP_1>'
 
 ## Step 2. Add a document and its texts
 
-**Prerequisites:** collection `C` exists. `PATCH` creates or partially updates a document by its exact, collection-scoped `external_id`.
+**Prerequisites:** collection `C` exists. `PATCH` creates or partially updates a document by its exact, collection-scoped `external_id`. Texts use `knd`, optional `lng`, and `cnt`.
 
 ```bash
 curl -i -X PATCH "$BASE/api/v2/collections/$C/documents/by-external-id?external_id=example%3Aapi-001" \
   -H 'Content-Type: application/json' \
-  -d '{"metadata":{"title":"Open research","year":2024},"texts":[{"text_id":"title-en","kind":"title","language":"en","content":"Open research"},{"text_id":"abstract-en","kind":"abstract","language":"en","content":"Open access makes research easier to discover and reuse."}]}'
+  -d '{"metadata":{"title":"Open research","year":2024},"texts":[{"knd":"title","lng":"pt","cnt":"Acesso aberto à pesquisa"},{"knd":"abstract","lng":"pt","cnt":"Este estudo apresenta iniciativas de acesso aberto e sua contribuição para a divulgação da pesquisa científica."}]}'
 ```
 
 **Expected:** 201 for a new document or 200 for an update, with its `id` and an `ETag`. Save the document UUID:
@@ -63,7 +64,9 @@ curl -i -X PATCH "$BASE/api/v2/collections/$C/documents/by-external-id?external_
 D='<DOCUMENT_UUID_FROM_STEP_2>'
 ```
 
-Repeat this step with other external IDs to add more documents. Ingestion does **not** generate vectors. PATCH preserves omitted text keys; when supplied, `metadata` replaces the entire metadata object. For complete replacement, use PUT with both `metadata` and `texts`; omitted texts are removed.
+Repeat this step with other external IDs to add more documents. Ingestion does **not** generate vectors. When supplied, `metadata` replaces the entire metadata object.
+
+When supplied, `texts` upserts each kind/language occurrence and preserves omitted texts. `PUT` replaces the complete text list. The service identifies repeated texts of the same kind and language by their occurrence order, so keep that order stable when updating.
 
 ## Step 3. Create or select an embedding profile
 
@@ -92,7 +95,7 @@ An `import_only` profile cannot run a generation job or text search. Generation 
 curl -i -X POST "$BASE/api/v2/collections/$C/indexations" \
   -H 'Content-Type: application/json' \
   -H 'Idempotency-Key: workflow-api-index-001' \
-  -d "{\"slug\":\"abstracts\",\"profile_id\":\"$P\",\"selection\":{\"kinds\":[\"abstract\"],\"languages\":[]},\"chunking\":{\"mode\":\"none\"},\"metric\":\"cosine\",\"ann_strategy\":\"hnsw_vector\"}"
+  -d "{\"slug\":\"titles_abstracts\",\"profile_id\":\"$P\",\"selection\":{\"kinds\":[\"title\",\"abstract\"],\"languages\":[]},\"chunking\":{\"mode\":\"none\"},\"metric\":\"cosine\",\"ann_strategy\":\"hnsw_vector\"}"
 ```
 
 **Expected:** 202 with an indexation `id`, a provisioning `job_id`, and a `Location` header pointing to the **indexation**. Save both IDs:
@@ -132,7 +135,7 @@ curl "$BASE/api/v2/jobs/$J/errors"
 
 Wait for `status: "succeeded"`. A newly prepared and generated abstract can produce counters such as `units_prepared: 1` and `vectors_generated: 1`; existing units or reusable vectors can change the counters. Inspect `completed_with_errors`, `failed`, `global_error_code`, and `/errors` when necessary.
 
-To process all documents captured in the collection, submit a new job with `{"document_ids":[]}` and a **new** idempotency key. A collection-wide job captures an enumeration limit; documents added later need another job. A separate preparation job is optional because generation prepares missing units.
+To process all documents captured in the collection, submit a new job with `{"document_ids":[]}` and a **new** idempotency key. A collection-wide job captures an enumeration limit; documents added later need another job. Generation prepares units from the currently selected texts and creates any missing vectors for those units.
 
 ## Step 6. Retrieve vectors for a document or collection
 
@@ -198,8 +201,8 @@ Each nonempty line is an independent record containing `schema_version: "1"`:
 ```bash
 WORK_DIR=$(mktemp -d)
 cat > "$WORK_DIR/documents.jsonl" <<'JSONL'
-{"schema_version":"1","external_id":"example:import-001","metadata":{"title":"Open science","year":2024},"texts":[{"text_id":"abstract-en","kind":"abstract","language":"en","content":"Open science supports reproducible research."}]}
-{"schema_version":"1","external_id":"example:import-002","metadata":{"title":"Research data","year":2023},"texts":[{"text_id":"abstract-en","kind":"abstract","language":"en","content":"Research data can be shared and reused."}]}
+{"schema_version":"1","external_id":"example:import-001","metadata":{"title":"Open science","year":2024},"texts":[{"knd":"abstract","lng":"en","cnt":"Open science supports reproducible research."}]}
+{"schema_version":"1","external_id":"example:import-002","metadata":{"title":"Research data","year":2023},"texts":[{"knd":"abstract","lng":"en","cnt":"Research data can be shared and reused."}]}
 JSONL
 curl -i -X POST "$BASE/api/v2/collections/$C/imports" \
   -H 'Idempotency-Key: workflow-import-jsonl-001' \
@@ -214,7 +217,7 @@ One top-level object contains `schema_version` and a `documents` array:
 ```bash
 WORK_DIR=$(mktemp -d)
 cat > "$WORK_DIR/documents.json" <<'JSON'
-{"schema_version":"1","documents":[{"external_id":"example:import-001","metadata":{"title":"Open science","year":2024},"texts":[{"text_id":"abstract-en","kind":"abstract","language":"en","content":"Open science supports reproducible research."}]},{"external_id":"example:import-002","metadata":{"title":"Research data","year":2023},"texts":[{"text_id":"abstract-en","kind":"abstract","language":"en","content":"Research data can be shared and reused."}]}]}
+{"schema_version":"1","documents":[{"external_id":"example:import-001","metadata":{"title":"Open science","year":2024},"texts":[{"knd":"abstract","lng":"en","cnt":"Open science supports reproducible research."}]},{"external_id":"example:import-002","metadata":{"title":"Research data","year":2023},"texts":[{"knd":"abstract","lng":"en","cnt":"Research data can be shared and reused."}]}]}
 JSON
 curl -i -X POST "$BASE/api/v2/collections/$C/imports" \
   -H 'Idempotency-Key: workflow-import-json-001' \
@@ -230,7 +233,7 @@ curl "$BASE/api/v2/jobs/$J"
 curl "$BASE/api/v2/jobs/$J/errors"
 ```
 
-Continue after the job succeeds; inspect item errors and `global_error_code` for failures. `merge` applies PATCH semantics. `replace` applies PUT semantics to documents in the file without deleting other documents. These sample files contain **no embeddings**, so the import does not generate vectors or call a provider. JSONL errors can be reported per line; a malformed JSON container can fail globally.
+Continue after the job succeeds; inspect item errors and `global_error_code` for failures. `merge` applies PATCH semantics. `replace` applies PUT semantics to documents in the file without deleting other documents. The compact text fields are `knd` (kind), `lng` (optional language), and `cnt` (content). The service assigns internal text keys; document GET responses use the direct API's representation. Preserve the order of texts within each kind/language group across updates so generated keys remain stable. These sample files contain **no embeddings**, so the import does not generate vectors or call a provider. JSONL errors can be reported per line; a malformed JSON container can fail globally.
 
 ## Step 3. Create or select an embedding profile
 
@@ -324,6 +327,119 @@ curl -X POST "$BASE/api/v2/collections/$C/indexations/$I/search" \
 ```
 
 **Expected:** 200 with ranked document results and distances. Exact mode reports `recall_guaranteed: true`; with fewer than 10 matching documents, `shortfall_reason` is `exhausted`. For approximate mode the ANN index must also be ready.
+
+---
+
+# Workflow 3 — Documents imported with embeddings
+
+This workflow imports document-level vectors that were generated externally. It uses the synthetic three-dimensional example in [import-document-vectors.json](examples/import-document-vectors.json). The import stores the supplied vectors directly. A real query vector must be produced by the same model and revision as the imported vectors.
+
+## Step 1. Create a collection
+
+**Prerequisites:** the common prerequisites, including enabled imports and shared durable storage. Choose an unused collection slug and idempotency key.
+
+```bash
+curl -i -X POST "$BASE/api/v2/collections" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: workflow-import-vectors-collection-001' \
+  -d '{"slug":"workflow-import-vectors","name":"Imported document vectors"}'
+```
+
+**Expected:** 201 with the collection `id`. Save it for the remaining steps:
+
+```bash
+C='<COLLECTION_UUID>'
+```
+
+## Step 2. Inspect the import file
+
+**Prerequisites:** run the following command from the repository root. The example file must be available locally.
+
+```bash
+cat docs/examples/import-document-vectors.json
+```
+
+**Expected:** a JSON container with `schema_version` and a `documents` array. Its document contains an `external_id`, metadata, abbreviated texts (`knd`, `lng`, `cnt`), a complete `embedding_profile`, an `indexation`, and two `embeddings`, each with an independent `id` and `vec`. These vectors represent the whole document and are independent of individual texts. The profile uses `import_only`, dimension 3 and no provider reference; the indexation uses cosine distance and HNSW. The vectors are synthetic examples, not outputs from a real model.
+
+For your own data, supply finite, nonzero vectors with exactly the profile's declared dimensions and a model and revision that describe how they were produced. Keep the profile and indexation configuration consistent across records using the same slugs.
+
+## Step 3. Import the document and embeddings
+
+**Prerequisites:** collection `C` exists, the import worker is running, and the example file is available. Use a new idempotency key for each new import.
+
+```bash
+curl -i -X POST "$BASE/api/v2/collections/$C/imports" \
+  -H 'Idempotency-Key: workflow-import-vectors-001' \
+  -F 'options={"format":"json","mode":"merge"};type=application/json' \
+  -F 'file=@docs/examples/import-document-vectors.json;type=application/octet-stream'
+```
+
+**Expected:** 202 with an import job ID and `Location`. Acceptance does not mean the import has finished. Save the job ID, poll until it reaches a terminal status, and inspect any item errors:
+
+```bash
+J='<IMPORT_JOB_UUID>'
+curl "$BASE/api/v2/jobs/$J"
+curl "$BASE/api/v2/jobs/$J/errors?limit=100"
+```
+
+Continue when the job reports `succeeded`. For `completed_with_errors` or `failed`, inspect the errors and `global_error_code`; correct the file or configuration and submit a new import. The service creates the profile and indexation if absent, or reuses matching resources. A matching slug with different configuration rejects that record; a profile fingerprint already used under another slug also conflicts. An existing indexation must be ready. Each record and its resources commit together; other records already committed are retained.
+
+## Step 4. Find the created or reused resources
+
+**Prerequisites:** the import job succeeded for the example record. Profiles are global; indexations and documents belong to the collection.
+
+```bash
+curl "$BASE/api/v2/embedding-profiles?limit=100"
+curl "$BASE/api/v2/collections/$C/indexations?limit=100"
+curl --get "$BASE/api/v2/collections/$C/documents/by-external-id" \
+  --data-urlencode 'external_id=example:document-embedding-001'
+```
+
+**Expected:** 200 responses. Find the profile with slug `external-model-three-dimensions` and the indexation with slug `document-vectors`; follow `next_cursor` if necessary. The indexation's `profile_id` identifies the profile, and its `state` is `ready`. Save the indexation ID and the document ID:
+
+```bash
+I='<INDEXATION_UUID>'
+D='<DOCUMENT_UUID>'
+```
+
+The vector table can be ready while `ann_state` is `pending`; exact search does not require an ANN index.
+
+## Step 5. Retrieve the document's vectors
+
+**Prerequisites:** the document `D` and ready indexation `I` were found in step 4, and the record imported successfully.
+
+```bash
+curl "$BASE/api/v2/collections/$C/indexations/$I/documents/$D/vectors"
+curl "$BASE/api/v2/collections/$C/documents/$D/vectors"
+```
+
+**Expected:** 200 responses containing the two imported embeddings in `items`, identified by `document-representation-v1` and `document-representation-v2`. Their `embedding` arrays contain the imported values. The second request includes all ready indexations for the document; follow `next_cursor` for additional pages. `coverage.document_vectors` counts imported vectors; `coverage.texts` reports separate per-text generation progress, which remains pending for document-only imports. To retrieve vectors for every document in the collection, use the [paginated collection example](#retrieving-vectors-for-an-entire-collection).
+
+Imported document vectors are independent of texts and are retained when texts or metadata change. Reimporting the same embedding ID replaces that vector; omitted embedding IDs remain stored. The client is responsible for replacing vectors that no longer represent the document.
+
+## Step 6. Search using an external vector
+
+**Prerequisites:** indexation `I` is ready and contains the imported vectors. Supply a query vector of the same dimensions and model space as the profile. With `import_only`, text queries and provider-based generation are unavailable.
+
+```bash
+curl -X POST "$BASE/api/v2/collections/$C/indexations/$I/search" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":{"vector":[0.1,0.2,0.3]},"mode":"exact","top_n":10,"result_unit":"document","include":["metadata"]}'
+```
+
+**Expected:** 200 with the imported document among the ranked results, `recall_guaranteed: true`, and a distance. Document results group matching vectors by document. Exact search works without building an ANN index; the example vector only demonstrates the request format.
+
+## Step 7. Optionally build an ANN index and search approximately
+
+**Prerequisites:** steps 3–6 succeeded, the indexation uses an HNSW strategy, and a worker is enabled. Follow [build or verify the ANN index](#optional-build-or-verify-the-ann-index), using `C` and `I` from this workflow. Wait until the maintenance job succeeds and `ann_state` is `ready` before searching.
+
+```bash
+curl -X POST "$BASE/api/v2/collections/$C/indexations/$I/search" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":{"vector":[0.1,0.2,0.3]},"mode":"approximate","top_n":10,"result_unit":"document","include":["metadata"]}'
+```
+
+**Expected:** 200 with approximate results and `recall_guaranteed: false`. An existing ready ANN index is maintained as vectors are inserted; it does not need rebuilding for each import.
 
 ---
 

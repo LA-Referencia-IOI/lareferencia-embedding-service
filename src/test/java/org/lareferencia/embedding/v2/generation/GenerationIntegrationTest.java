@@ -30,6 +30,8 @@ class GenerationIntegrationTest {
   @DynamicPropertySource static void database(DynamicPropertyRegistry r) {String url=TestDatabase.create();r.add("spring.datasource.url",()->url);r.add("spring.datasource.username",()->"postgres");r.add("spring.datasource.password",()->"");}
   @Autowired MockMvc mvc;@Autowired ObjectMapper mapper;@Autowired @Qualifier("jdbcTemplate") JdbcTemplate jdbc;
   @Autowired JobRepository jobs;@Autowired JobHandlers handlers;@MockitoBean ProviderRegistry provider;
+  @Autowired org.lareferencia.embedding.v2.retrieval.VectorRetrievalService retrieval;
+  @Autowired org.lareferencia.embedding.v2.search.SearchService search;
   @org.junit.jupiter.api.AfterEach void releaseTestJobs() {
     jdbc.update("UPDATE dvp.jobs SET status='failed',lease_owner=NULL,lease_until=NULL WHERE status IN ('queued','running')");
   }
@@ -45,10 +47,10 @@ class GenerationIntegrationTest {
         INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state)
         VALUES (?,?,?,?,'{}'::jsonb,?::jsonb,'cosine',?,?,'ready','pending')
         """,i,c,"index",p,chunking,strategy,table);
-    jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY,document_id uuid NOT NULL,source_text_id uuid NOT NULL,source_revision bigint NOT NULL,"
+    jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY,document_id uuid NOT NULL,"
         +"indexation_id uuid NOT NULL CHECK(indexation_id='"+i+"'),embedding vector(2) NOT NULL,input_hash char(64) NOT NULL,"
         +"origin varchar(10) NOT NULL,origin_job_id uuid,created_at timestamptz NOT NULL DEFAULT now(),"
-        +"FOREIGN KEY(unit_id,document_id,source_text_id,source_revision,indexation_id) REFERENCES dvp.vector_units(id,document_id,source_text_id,source_revision,indexation_id) ON DELETE CASCADE)");
+        +"FOREIGN KEY(unit_id,document_id,indexation_id) REFERENCES dvp.vector_units(id,document_id,indexation_id) ON DELETE CASCADE)");
     return new Fixture(c,i,table);
   }
   private UUID document(Fixture f,String external,String content) {
@@ -68,6 +70,34 @@ class GenerationIntegrationTest {
     run(submit(f,"{}",202));verify(provider,times(1)).embed(any(),anyList());
     assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id IN (?,?)",Integer.class,a,b));
   }
+  @Test void generatedVectorsBelongToDocumentWithoutSourceReferences() throws Exception {
+    Fixture f=fixture("http","hnsw_vector","{\"mode\":\"none\"}");UUID doc=document(f,"document-owned","title text");
+    jdbc.update("INSERT INTO dvp.source_texts(id,document_id,text_key,kind,content,content_hash) VALUES (?,?,'abstract','abstract','abstract text',?)",UUID.randomUUID(),doc,"b".repeat(64));
+    when(provider.batchSize(any())).thenReturn(16);
+    when(provider.embed(any(),anyList())).thenReturn(List.of(new float[]{1,2},new float[]{2,1}));
+    UUID job=submit(f,"{}",202);run(job);
+    assertEquals("succeeded",jobs.find(job).orElseThrow().status());
+    assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM dvp."+f.table()+" WHERE document_id=?",Integer.class,doc));
+    assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=? AND prepared_text IS NOT NULL",Integer.class,doc));
+    var page=retrieval.get(f.collection().toString(),f.indexation().toString(),doc.toString(),false,new org.springframework.util.LinkedMultiValueMap<>());
+    assertEquals(2,((List<?>)page.get("items")).size());
+    var descriptor=(Map<?,?>)((Map<?,?>)page.get("indexations")).get(f.indexation().toString());
+    var coverage=(Map<?,?>)descriptor.get("coverage");assertEquals("complete",coverage.get("state"));
+    assertEquals(2,((List<?>)coverage.get("texts")).size());
+    var query=mapper.readTree("{\"query\":{\"vector\":[1,2]},\"mode\":\"exact\",\"result_unit\":\"unit\"}");
+    assertEquals(2,((List<?>)search.search(f.collection().toString(),f.indexation().toString(),query).get("results")).size());
+    jdbc.update("UPDATE dvp.source_texts SET content='changed',revision=revision+1 WHERE document_id=? AND kind='title'",doc);
+    var changed=retrieval.get(f.collection().toString(),f.indexation().toString(),doc.toString(),false,new org.springframework.util.LinkedMultiValueMap<>());
+    var changedCoverage=(Map<?,?>)((Map<?,?>)((Map<?,?>)changed.get("indexations")).get(f.indexation().toString())).get("coverage");
+    assertEquals("partial",changedCoverage.get("state"));assertEquals(1,changedCoverage.get("unprepared_texts"));
+    jdbc.execute("CREATE INDEX "+f.table()+"_ann ON dvp."+f.table()+" USING hnsw (embedding vector_cosine_ops)");
+    jdbc.update("UPDATE dvp.indexations SET ann_state='ready' WHERE id=?",f.indexation());
+    ((com.fasterxml.jackson.databind.node.ObjectNode)query).put("mode","approximate");
+    assertEquals(2,((List<?>)search.search(f.collection().toString(),f.indexation().toString(),query).get("results")).size());
+    jdbc.update("DELETE FROM dvp.source_texts WHERE document_id=?",doc);
+    assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM dvp."+f.table()+" WHERE document_id=?",Integer.class,doc));
+    assertEquals(2,((List<?>)retrieval.get(f.collection().toString(),f.indexation().toString(),doc.toString(),false,new org.springframework.util.LinkedMultiValueMap<>()).get("items")).size());
+  }
   @Test void importOnlyCannotGenerateAndHalfvecOverflowFailsWithoutVector() throws Exception {
     Fixture imported=fixture("import_only","none","{\"mode\":\"none\"}");submit(imported,"{}",409);
     Fixture f=fixture("http","hnsw_halfvec","{\"mode\":\"none\"}");document(f,"a","body");
@@ -75,6 +105,7 @@ class GenerationIntegrationTest {
     UUID job=submit(f,"{}",202);run(job);
     assertEquals("completed_with_errors",jobs.find(job).orElseThrow().status());assertEquals("halfvec_not_representable",jobs.errors(job,null,10).getFirst().code());
     assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM dvp."+f.table(),Integer.class));
+    assertEquals("prepared",jdbc.queryForObject("SELECT state FROM dvp.text_indexation_progress WHERE indexation_id=?",String.class,f.indexation()));
   }
   @Test void changedSourceDuringProviderCallNeverPublishesStaleVector() throws Exception {
     Fixture f=fixture("http","none","{\"mode\":\"none\"}");UUID doc=document(f,"race","before");
@@ -86,7 +117,7 @@ class GenerationIntegrationTest {
       try {
         assertTrue(entered.await(5,TimeUnit.SECONDS));
         mvc.perform(patch("/api/v2/collections/"+f.collection()+"/documents/by-external-id").param("external_id","race")
-            .contentType(MediaType.APPLICATION_JSON).content("{\"texts\":[{\"text_id\":\"text\",\"kind\":\"title\",\"content\":\"after\"}]}"))
+            .contentType(MediaType.APPLICATION_JSON).content("{\"texts\":[{\"knd\":\"title\",\"cnt\":\"after\"}]}"))
             .andExpect(status().isOk());
       } finally {release.countDown();}
       assertTrue(pending.get(5,TimeUnit.SECONDS));assertTrue(jobs.finishIfComplete(lease));
@@ -102,6 +133,28 @@ class GenerationIntegrationTest {
     var inputs=org.mockito.ArgumentCaptor.forClass(List.class);verify(provider,times(1)).embed(any(),inputs.capture());
     assertEquals(List.of("passage: same"),inputs.getValue());
     assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM dvp."+f.table(),Integer.class));
+  }
+  @Test void rerunDoesNotGeneratePendingUnitsFromReplacedText() throws Exception {
+    Fixture fixture=fixture("http","none","{\"mode\":\"none\"}");
+    UUID document=document(fixture,"replaced","old text");
+    when(provider.batchSize(any())).thenReturn(16);
+    when(provider.embed(any(),eq(List.of("passage: old text")))).thenReturn(List.of(new float[]{0,0}));
+    UUID first=submit(fixture,"{}",202);
+    run(first);
+    assertEquals("completed_with_errors",jobs.find(first).orElseThrow().status());
+    assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=?",Integer.class,document));
+
+    jdbc.update("UPDATE dvp.source_texts SET content='new text',revision=revision+1 WHERE document_id=?",document);
+    clearInvocations(provider);
+    when(provider.embed(any(),eq(List.of("passage: new text")))).thenReturn(List.of(new float[]{1,2}));
+    UUID second=submit(fixture,"{}",202);
+    run(second);
+
+    verify(provider,times(1)).embed(any(),eq(List.of("passage: new text")));
+    verify(provider,times(1)).embed(any(),anyList());
+    assertEquals("succeeded",jobs.find(second).orElseThrow().status());
+    assertEquals(List.of("new text"),jdbc.queryForList(
+        "SELECT u.prepared_text FROM dvp.vector_units u JOIN dvp."+fixture.table()+" v ON v.unit_id=u.id",String.class));
   }
   @Test void retryableProviderFailureIsPersistedAndCanResume() throws Exception {
     Fixture f=fixture("http","none","{\"mode\":\"none\"}");document(f,"retry","body");
