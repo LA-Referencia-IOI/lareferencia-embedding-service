@@ -440,6 +440,8 @@ Current coverage includes:
 
 ## v2 Collections and upgrades
 
+See the [harvester-to-vector workflow](docs/HARVESTER-EMBEDDINGS.es.md) for the complete export, calculation and import workflow.
+
 See [Python scripts](scripts/python/README.md) for computing embeddings from harvester exports and importing the resulting packages directly into PostgreSQL v2.
 
 For a consolidated guide to the platform, end-to-end workflow, API examples and operations, see [Platform Guide](docs/PLATFORM-GUIDE.md). For step-by-step API and import examples, see [Document-to-vector workflows](docs/WORKFLOWS.md).

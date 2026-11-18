@@ -2,6 +2,8 @@
 
 Herramientas independientes para preparar datos de intercambio para el servicio de embeddings.
 
+Para el flujo completo, consulta la [guía del cosechador a v2](../../docs/HARVESTER-EMBEDDINGS.es.md).
+
 ## Calcular embeddings desde una exportación del cosechador
 
 `compute_metadata_embeddings.py` recibe una exportación JSONL con estado
