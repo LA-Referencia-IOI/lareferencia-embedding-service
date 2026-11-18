@@ -18,10 +18,11 @@ class ProviderRegistryTest {
   private ThreadPoolExecutor executor;
   private ProviderRegistry registry;
   private final AtomicInteger first=new AtomicInteger(),second=new AtomicInteger();
+  private final java.util.concurrent.atomic.AtomicReference<String> requestedModel=new java.util.concurrent.atomic.AtomicReference<>();
   private final CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);
   @BeforeEach void setup() throws Exception {
     server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
-    server.createContext("/first",exchange->{first.incrementAndGet();exchange.getRequestBody().readAllBytes();
+    server.createContext("/first",exchange->{first.incrementAndGet();requestedModel.set(new ObjectMapper().readTree(exchange.getRequestBody()).path("model").asText());
       byte[] response="{\"data\":[{\"index\":1,\"embedding\":[3,4]},{\"index\":0,\"embedding\":[1,2]}]}".getBytes(StandardCharsets.UTF_8);
       exchange.sendResponseHeaders(200,response.length);exchange.getResponseBody().write(response);exchange.close();});
     server.createContext("/second",exchange->{second.incrementAndGet();exchange.getRequestBody().readAllBytes();
@@ -39,6 +40,7 @@ class ProviderRegistryTest {
       var provider=new ProviderProperties.Provider();provider.setType(name.equals("second")?"OLLAMA":"OPENAI_COMPATIBLE");
       provider.setEndpoint("http://127.0.0.1:"+server.getAddress().getPort()+"/"+(name.equals("secret")?"first":name));provider.setConcurrency(1);
       if(name.equals("secret")) provider.setSecretRef("DVP_TEST_MISSING_SECRET_REFERENCE");
+      if(name.equals("first")) provider.setModelAliases(Map.of("model","ollama-model:tag"));
       provider.setRequestTimeout(Duration.ofSeconds(1));provider.setBatchSize(2);map.put(name,provider);
     }
     p.setProviders(map);executor=new ThreadPoolExecutor(2,2,0,TimeUnit.SECONDS,new SynchronousQueue<>());
@@ -54,11 +56,19 @@ class ProviderRegistryTest {
   @Test void routesDistinctProvidersAndRestoresIndexedOrder() {
     var one=registry.embed(profile("first","http"),List.of("a","b"));
     assertArrayEquals(new float[]{1,2},one.get(0));assertArrayEquals(new float[]{3,4},one.get(1));
+    assertEquals("ollama-model:tag",requestedModel.get());
     var two=registry.embed(profile("second","http"),List.of("a","b"));
     assertArrayEquals(new float[]{5,6},two.get(0));assertArrayEquals(new float[]{7,8},two.get(1));
     assertEquals(1,first.get());assertEquals(1,second.get());
     assertEquals(2,meters.find("dvp.provider.duration").tag("outcome","success").timer().count());
     assertFalse(meters.getMeters().toString().contains("first"));
+  }
+  @Test void propertyBindingPreservesCanonicalModelSlash() {
+    var source=new org.springframework.boot.context.properties.source.MapConfigurationPropertySource(
+        Map.of("app.dvp.providers.local.model-aliases[google/embeddinggemma-2]","embeddinggemma-2:270m"));
+    var properties=new org.springframework.boot.context.properties.bind.Binder(source)
+        .bind("app.dvp",org.springframework.boot.context.properties.bind.Bindable.of(ProviderProperties.class)).get();
+    assertEquals("embeddinggemma-2:270m",properties.getProviders().get("local").getModelAliases().get("google/embeddinggemma-2"));
   }
   @Test void rejectsBadResponsesImportOnlyAndOversizedBatches() {
     assertEquals("invalid_provider_response",assertThrows(V2Exception.class,()->registry.embed(profile("invalid","http"),List.of("a","b"))).code());

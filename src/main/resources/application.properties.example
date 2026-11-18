@@ -33,6 +33,8 @@ app.dvp.workers-enabled=${DVP_WORKERS_ENABLED:false}
 app.dvp.role=${DVP_ROLE:API}
 app.dvp.providers.local.type=OPENAI_COMPATIBLE
 app.dvp.providers.local.endpoint=${DVP_LOCAL_PROVIDER_ENDPOINT:http://localhost:11434/v1/embeddings}
+# Optional mapping from the canonical profile model to the name used by this provider.
+# app.dvp.providers.local.model-aliases[google/embeddinggemma-2]=embeddinggemma-2:270m
 app.dvp.worker-concurrency=${DVP_WORKER_CONCURRENCY:4}
 app.dvp.worker-poll-millis=${DVP_WORKER_POLL_MILLIS:1000}
 app.dvp.lease-seconds=${DVP_LEASE_SECONDS:120}

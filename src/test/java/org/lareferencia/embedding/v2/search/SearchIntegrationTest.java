@@ -58,6 +58,27 @@ class SearchIntegrationTest {
     assertEquals("profile_not_executable",assertThrows(V2Exception.class,()->search(f,"{\"query\":{\"text\":\"hello\"},\"mode\":\"exact\"}")).code());
     assertEquals("approximate_search_unavailable",assertThrows(V2Exception.class,()->search(f,"{\"query\":{\"vector\":[1,0]}}")).code());
   }
+  @Test void textSearchCanUseCompatibleHttpProfile() throws Exception {
+    Fixture f=fixture("cosine","none");UUID doc=document(f,"imported");unit(f,doc,0,"[1,0]");UUID queryProfile=UUID.randomUUID();
+    jdbc.update("""
+        INSERT INTO dvp.embedding_profiles(id,slug,model,model_revision,dimensions,execution_mode,provider_ref,preparation,fingerprint)
+        VALUES (?,?,'test','v1',2,'http','test','{"version":"identity-v1","document_prefix":"","query_prefix":""}',?)
+        """,queryProfile,"query-"+queryProfile,queryProfile.toString().replace("-","").repeat(2));
+    org.mockito.Mockito.when(providers.embed(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.anyList())).thenReturn(List.of(new float[]{1,0}));
+    String body="{\"query\":{\"text\":\"hello\",\"profile_id\":\""+queryProfile+"\"},\"mode\":\"exact\"}";
+    var result=search(f,body);assertEquals(1,((List<?>)result.get("results")).size());
+    org.mockito.Mockito.verify(providers).embed(org.mockito.ArgumentMatchers.argThat(p->p.id().equals(queryProfile)),org.mockito.ArgumentMatchers.eq(List.of("hello")));
+    jdbc.update("UPDATE dvp.embedding_profiles SET model='different' WHERE id=?",queryProfile);
+    assertEquals("incompatible_query_profile",assertThrows(V2Exception.class,()->search(f,body)).code());
+    jdbc.update("UPDATE dvp.embedding_profiles SET model='test',dimensions=3 WHERE id=?",queryProfile);
+    assertEquals("incompatible_query_profile",assertThrows(V2Exception.class,()->search(f,body)).code());
+    jdbc.update("UPDATE dvp.embedding_profiles SET model_revision='different',dimensions=2,preparation='{\"version\":\"identity-v1\",\"document_prefix\":\"\",\"query_prefix\":\"query: \"}'::jsonb WHERE id=?",queryProfile);
+    assertEquals(1,((List<?>)search(f,body).get("results")).size());
+    org.mockito.Mockito.verify(providers).embed(org.mockito.ArgumentMatchers.argThat(p->p.id().equals(queryProfile)),org.mockito.ArgumentMatchers.eq(List.of("query: hello")));
+    org.mockito.Mockito.verify(providers,org.mockito.Mockito.times(2)).embed(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.anyList());
+    assertEquals(404,assertThrows(V2Exception.class,()->search(f,body.replace(queryProfile.toString(),UUID.randomUUID().toString()))).status());
+    assertEquals(400,assertThrows(V2Exception.class,()->search(f,"{\"query\":{\"vector\":[1,0],\"profile_id\":\""+queryProfile+"\"},\"mode\":\"exact\"}")).status());
+  }
   @Test void blockedTextInferenceRespectsAdmissionAndKeepsHeartbeatAndWritesAvailable() throws Exception {
     Fixture f=fixture("cosine","none");UUID d=document(f,"a");unit(f,d,1,"[1,0]");
     jdbc.update("UPDATE dvp.embedding_profiles SET execution_mode='http',provider_ref='test',preparation='{\"version\":\"identity-v1\",\"document_prefix\":\"\",\"query_prefix\":\"query: \"}' WHERE id=(SELECT profile_id FROM dvp.indexations WHERE id=?)",f.index());
@@ -137,13 +158,37 @@ class SearchIntegrationTest {
       Map.entry("/api/v2/collections/{collection}/indexations/{id}/maintenance-jobs","post"),
       Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/generation-jobs","post"),
       Map.entry("/api/v2/collections/{collection}/imports","post"),Map.entry("/api/v2/jobs/{id}/retries","post"),
-      Map.entry("/api/v2/collections/{collection}/documents/{document}/vectors","get"),
-      Map.entry("/api/v2/collections/{collection}/document-vectors","get"),
+      Map.entry("/api/v2/collections/{collection}/documents","get"),
       Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/documents/{document}/vectors","get"),
-      Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/document-vectors","get"),
+      Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/vectors","get"),
       Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/search","post"));
     expected.forEach((path,method)->assertTrue(paths.path(path).has(method),"OpenAPI missing "+method+" "+path));
+    var parameters=paths.path("/api/v2/collections/{collection}/indexations/{indexation}/vectors").path("get").path("parameters");
+    var external=java.util.stream.StreamSupport.stream(parameters.spliterator(),false).filter(p->p.path("name").asText().equals("external_id")).findFirst().orElseThrow();
+    assertEquals("query",external.path("in").asText());assertTrue(external.path("required").asBoolean());
+    assertTrue(java.util.stream.StreamSupport.stream(parameters.spliterator(),false).anyMatch(p->p.path("name").asText().equals("limit")));
+    assertTrue(java.util.stream.StreamSupport.stream(parameters.spliterator(),false).anyMatch(p->p.path("name").asText().equals("cursor")));
+    assertFalse(paths.has("/api/v2/collections/{collection}/documents/{document}/vectors"));
+    assertFalse(paths.has("/api/v2/collections/{collection}/document-vectors"));
+    assertFalse(paths.has("/api/v2/collections/{collection}/vectors"));
+    assertFalse(paths.has("/api/v2/collections/{collection}/indexations/{indexation}/document-vectors"));
     assertFalse(paths.has("/api/v2/collections/{collection}/indexations/{indexation}/preparation-jobs"));
+  }
+
+  @Test void homePageLinksToDocumentationAndOperations() throws Exception {
+    mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/"))
+      .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+      .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl("index.html"));
+    mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/index.html"))
+      .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+      .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().contentTypeCompatibleWith("text/html"))
+      .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.allOf(
+          org.hamcrest.Matchers.containsString("href=\"/swagger-ui/index.html\""),
+          org.hamcrest.Matchers.containsString("href=\"/api-docs\""),
+          org.hamcrest.Matchers.containsString("href=\"/api-docs/swagger-config\""),
+          org.hamcrest.Matchers.containsString("href=\"/actuator/health\""),
+          org.hamcrest.Matchers.containsString("href=\"/actuator/metrics\""),
+          org.hamcrest.Matchers.containsString("href=\"/actuator/metrics/jvm.memory.used\""))));
   }
 
   @Test void openApiGroupsVersionsInSwaggerOrderAndUsesNewDocumentUrl() throws Exception {

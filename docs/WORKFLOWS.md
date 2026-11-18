@@ -139,25 +139,19 @@ Wait for `status: "succeeded"`. A newly prepared and generated abstract can prod
 
 To process all documents captured in the collection, submit a new job with `{"document_ids":[]}` and a **new** idempotency key. A collection-wide job captures an enumeration limit; documents added later need another job. Generation prepares units from the currently selected texts and creates any missing vectors for those units.
 
-## Step 6. Retrieve vectors for a document or collection
+## Step 6. Retrieve vectors for a document in an indexation
 
 **Prerequisites:** the generation job has succeeded for the document and indexation. Retrieval only reads existing vectors; it never starts generation.
 
 For this document and indexation:
 
 ```bash
-curl "$BASE/api/v2/collections/$C/indexations/$I/documents/$D/vectors?include=texts,metadata"
+curl "$BASE/api/v2/collections/$C/indexations/$I/documents/$D/vectors"
 ```
 
-For the document across all ready indexations in the collection:
+**Expected:** 200 with `object: "list"`, the indexation profile `model`, and all vectors in `data[].embedding`; this profile returns 1024 values per vector. An existing document without vectors returns 200 with empty `data`.
 
-```bash
-curl "$BASE/api/v2/collections/$C/documents/$D/vectors"
-```
-
-**Expected:** 200 with `document`, `indexations`, `items`, and `next_cursor`. Each vector appears in `items[].embedding`; this profile returns 1024 values. Coverage should show `complete` when every unit of every selected text has a vector. An existing document without vectors returns 200 with empty `items`; all-indexation retrieval also reports `unavailable_indexation_ids`.
-
-There is no single endpoint that returns vectors for every document in a collection. To inspect the collection, list its documents and request vectors for each document, following `next_cursor` for **both** lists. A complete pagination example is in [Retrieving vectors for an entire collection](#retrieving-vectors-for-an-entire-collection).
+There is no single endpoint that returns vectors for every document in a collection. To inspect the collection, list its documents and request vectors for each document, following `next_cursor` for the document list and for vector pages when `limit` is used. A complete pagination example is in [Retrieving vectors for an entire collection](#retrieving-vectors-for-an-entire-collection).
 
 ## Step 7. Search
 
@@ -299,7 +293,7 @@ curl "$BASE/api/v2/jobs/$J/errors"
 
 Wait for `succeeded` and inspect the counters. The empty list selects all documents captured in the collection. For specific documents, provide up to 1000 distinct UUIDs in `document_ids`. A later run needs a new idempotency key; generation prepares missing units automatically.
 
-## Step 6. Retrieve vectors for a document or collection
+## Step 6. Retrieve vectors for a document in an indexation
 
 **Prerequisites:** the generation job succeeded for the imported documents. First resolve a document's internal UUID using its external ID:
 
@@ -312,11 +306,10 @@ curl --get "$BASE/api/v2/collections/$C/documents/by-external-id" \
 
 ```bash
 D='<DOCUMENT_UUID_RETURNED_ABOVE>'
-curl "$BASE/api/v2/collections/$C/indexations/$I/documents/$D/vectors?include=texts,metadata"
-curl "$BASE/api/v2/collections/$C/documents/$D/vectors"
+curl "$BASE/api/v2/collections/$C/indexations/$I/documents/$D/vectors"
 ```
 
-**Expected:** 200 with `items[].embedding` and coverage per indexation. The second request includes all ready indexations for that document. An empty `items` list means no current vectors were returned; inspect coverage and job errors. To retrieve vectors for every document in the collection, use the paginated example below.
+**Expected:** 200 with the indexation profile `model` and the vectors in `data[].embedding`. An empty `data` list means no vectors were returned; inspect generation job errors. To retrieve vectors for every document in the collection, use the paginated example below.
 
 ## Step 7. Search the imported documents
 
@@ -412,10 +405,9 @@ The vector table can be ready while `ann_state` is `pending`; exact search does 
 
 ```bash
 curl "$BASE/api/v2/collections/$C/indexations/$I/documents/$D/vectors"
-curl "$BASE/api/v2/collections/$C/documents/$D/vectors"
 ```
 
-**Expected:** 200 responses containing the two imported embeddings in `items`, identified by `document-representation-v1` and `document-representation-v2`. Their `embedding` arrays contain the imported values. The second request includes all ready indexations for the document; follow `next_cursor` for additional pages. `coverage.document_vectors` counts imported vectors; `coverage.texts` reports separate per-text generation progress, which remains pending for document-only imports. To retrieve vectors for every document in the collection, use the [paginated collection example](#retrieving-vectors-for-an-entire-collection).
+**Expected:** 200 with both imported vectors in `data[].embedding`. The response does not include their import IDs. If `limit` is specified, follow `next_cursor` for additional pages. To retrieve vectors for every document in the collection, use the [paginated collection example](#retrieving-vectors-for-an-entire-collection).
 
 Imported document vectors are independent of texts and are retained when texts or metadata change. Reimporting the same embedding ID replaces that vector; omitted embedding IDs remain stored. The client is responsible for replacing vectors that no longer represent the document.
 
@@ -447,10 +439,10 @@ curl -X POST "$BASE/api/v2/collections/$C/indexations/$I/search" \
 
 ## Retrieving vectors for an entire collection
 
-**Prerequisites:** `C` is a collection UUID, the API is reachable, and Python 3 is installed. The service exposes vector retrieval per document rather than a single collection-wide vector endpoint. This example follows document pages and vector pages, printing one JSON object per vector page. It can return large embedding arrays; use it only where output can be handled safely. It does not preserve one snapshot across pages.
+**Prerequisites:** `C` is a collection UUID, `I` is an indexation UUID in that collection, the API is reachable, and Python 3 is installed. The service exposes vector retrieval per document and indexation rather than a single collection-wide vector endpoint. This example follows document pages and vector pages, printing one JSON object per vector page. It can return large embedding arrays; use it only where output can be handled safely. It does not preserve one snapshot across pages.
 
 ```bash
-export BASE C
+export BASE C I
 python3 - <<'PY'
 import json
 import os
@@ -459,6 +451,7 @@ from urllib.request import urlopen
 
 base = os.environ['BASE'].rstrip('/')
 collection = os.environ['C']
+indexation = os.environ['I']
 
 def get(path, parameters):
     with urlopen(base + path + '?' + urlencode(parameters), timeout=30) as response:
@@ -477,7 +470,7 @@ while True:
             if vector_cursor:
                 vector_parameters['cursor'] = vector_cursor
             vectors = get(
-                f"/api/v2/collections/{collection}/documents/{document['id']}/vectors",
+                f"/api/v2/collections/{collection}/indexations/{indexation}/documents/{document['id']}/vectors",
                 vector_parameters,
             )
             print(json.dumps(vectors, ensure_ascii=False))
@@ -490,7 +483,7 @@ while True:
 PY
 ```
 
-**Expected:** one or more JSON responses for each existing document, with its coverage and vectors. A collection with no documents produces no output. Use the indexation-specific document route instead if only one indexation is needed.
+**Expected:** one or more JSON responses for each existing document, with its vectors for indexation `I`. A collection with no documents produces no output.
 
 ## Optional: build or verify the ANN index
 

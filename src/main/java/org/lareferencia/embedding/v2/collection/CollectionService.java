@@ -48,7 +48,7 @@ public class CollectionService {
       }
     });
   }
-  public CollectionResource get(String id,MultiValueMap<String,String> query) {
+  public CollectionDetails get(String id,MultiValueMap<String,String> query) {
     requireQuery(query,Set.of());
     UUID uuid=uuid(id);
     return reads.execute(status->repository.find(uuid)

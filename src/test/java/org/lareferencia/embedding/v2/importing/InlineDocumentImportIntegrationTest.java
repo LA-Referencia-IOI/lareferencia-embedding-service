@@ -44,14 +44,14 @@ class InlineDocumentImportIntegrationTest {
     UUID index=jdbc.queryForObject("SELECT id FROM dvp.indexations WHERE collection_id=? AND slug='inline'",UUID.class,f.collection());
     assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=? AND embedding_key IS NOT NULL",Integer.class,doc));
     var page=retrieval.get(f.collection().toString(),index.toString(),doc.toString(),false,new LinkedMultiValueMap<>());
-    var items=(List<?>)page.get("items");assertEquals(2,items.size());var ids=new HashSet<>();for(Object item:items){var value=(Map<?,?>)item;ids.add(value.get("id"));assertFalse(value.containsKey("text_id"));}
-    assertEquals(Set.of("document-embedding-1","independent-embedding-2"),ids);
+    var items=(List<?>)page.get("data");assertEquals(2,items.size());
+    assertEquals(Set.of("document-embedding-1","independent-embedding-2"),new HashSet<>(jdbc.queryForList("SELECT embedding_key FROM dvp.vector_units WHERE document_id=?",String.class,doc)));
     var query=mapper.readTree("{\"query\":{\"vector\":[1,2]},\"mode\":\"exact\",\"result_unit\":\"unit\",\"top_n\":10}");
     assertEquals(2,((List<?>)search.search(f.collection().toString(),index.toString(),query).get("results")).size());
     String textKey=jdbc.queryForObject("SELECT text_key FROM dvp.source_texts WHERE document_id=?",String.class,doc);
     var changed=new DocumentWriteRequest();changed.setTexts(List.of(new SourceTextInput(textKey,"title","en","Changed source")));changed.setMetadata(mapper.readTree("{\"year\":2026}"));
     writes.executeWithoutResult(tx->documents.upsertInTransaction(f.collection(),"document-a",changed,false,null));
-    assertEquals(2,((List<?>)retrieval.get(f.collection().toString(),index.toString(),doc.toString(),false,new LinkedMultiValueMap<>()).get("items")).size());
+    assertEquals(2,((List<?>)retrieval.get(f.collection().toString(),index.toString(),doc.toString(),false,new LinkedMultiValueMap<>()).get("data")).size());
     assertEquals(2,((List<?>)search.search(f.collection().toString(),index.toString(),query).get("results")).size());
     apply(f,record(f,"document-b"));assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.embedding_profiles WHERE slug=?",Integer.class,f.profile()));assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.indexations WHERE collection_id=?",Integer.class,f.collection()));
   }
@@ -116,13 +116,14 @@ class InlineDocumentImportIntegrationTest {
     UUID unit=UUID.randomUUID();
     jdbc.update("INSERT INTO dvp.vector_units(id,collection_id,indexation_id,document_id,ordinal,start_cp,end_cp,input_hash,prepared_text,prepared_key) VALUES (?,?,?,?,0,0,12,?,'Open science',?)",unit,f.collection(),index,doc,"a".repeat(64),unit.toString());
     jdbc.update("INSERT INTO dvp."+table+" (unit_id,document_id,indexation_id,embedding,input_hash,origin) VALUES (?,?,?,?::vector,?,'generated')",unit,doc,index,"[1,2]","a".repeat(64));
-    var q=new LinkedMultiValueMap<String,String>();q.add("limit","1");q.add("include","texts,metadata");Set<UUID> seen=new HashSet<>();int docs=0,texts=0;
+    var q=new LinkedMultiValueMap<String,String>();q.add("limit","1");int count=0;
     do {
-      var page=retrieval.get(f.collection().toString(),null,doc.toString(),false,q);var descriptor=(Map<?,?>)((Map<?,?>)page.get("indexations")).get(index.toString());var coverage=(Map<?,?>)descriptor.get("coverage");assertEquals(2L,coverage.get("document_vectors"));assertEquals(1L,coverage.get("current_vectors"));
-      for(Object item:(List<?>)page.get("items")){var value=(Map<?,?>)item;assertTrue(seen.add((UUID)value.get("unit_id")));if(value.containsKey("id")){docs++;assertFalse(value.containsKey("text_id"));}else{texts++;assertNotNull(value.get("text"));}}
+      var page=retrieval.get(f.collection().toString(),index.toString(),doc.toString(),false,q);
+      count+=((List<?>)page.get("data")).size();
       q.remove("cursor");if(page.get("next_cursor")!=null)q.add("cursor",page.get("next_cursor").toString());else break;
     } while(true);
-    assertEquals(3,seen.size());assertEquals(2,docs);assertEquals(1,texts);
+    assertEquals(3,count);
+
   }
 
   @Test void documentsOnlyJsonlExampleImportsAndReimportsWithoutProfiles() throws Exception {

@@ -20,8 +20,14 @@ public class CollectionRepository {
   public CollectionResource insert(UUID id,String slug,String name) {
     return write.queryForObject("INSERT INTO dvp.collections(id,slug,name) VALUES (?,?,?) RETURNING id,slug,name,created_at",ROW,id,slug,name);
   }
-  public Optional<CollectionResource> find(UUID id) {
-    return read.query("SELECT id,slug,name,created_at FROM dvp.collections WHERE id=?",ROW,id).stream().findFirst();
+  public Optional<CollectionDetails> find(UUID id) {
+    return read.query("""
+        SELECT c.id,c.slug,c.name,c.created_at,
+          (SELECT count(*) FROM dvp.documents d WHERE d.collection_id=c.id) AS documents,
+          (SELECT count(*) FROM dvp.indexations i WHERE i.collection_id=c.id) AS indexations
+        FROM dvp.collections c WHERE c.id=?
+        """,(rs,n)->new CollectionDetails(rs.getObject("id",UUID.class),rs.getString("slug"),rs.getString("name"),
+            rs.getTimestamp("created_at").toInstant(),new CollectionDetails.Counts(rs.getLong("documents"),rs.getLong("indexations"))),id).stream().findFirst();
   }
   public List<CollectionResource> list(UUID after,int limit) {
     return after==null

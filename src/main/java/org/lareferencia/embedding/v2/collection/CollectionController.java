@@ -46,7 +46,7 @@ public class CollectionController {
   public PageResponse<CollectionResource> list(@RequestParam MultiValueMap<String,String> query) { return service.list(query); }
 
   @GetMapping("/{id}")
-  @Operation(summary="Get a collection")
+  @Operation(summary="Get a collection",description="Includes exact counts of documents and indexations in all states.")
   @ApiResponses({@ApiResponse(responseCode="200",description="Collection"),@ApiResponse(responseCode="404",description="Collection absent",content=@Content(schema=@Schema(implementation=V2Error.class)))})
-  public CollectionResource get(@PathVariable String id,@RequestParam MultiValueMap<String,String> query) { return service.get(id,query); }
+  public CollectionDetails get(@PathVariable String id,@RequestParam MultiValueMap<String,String> query) { return service.get(id,query); }
 }

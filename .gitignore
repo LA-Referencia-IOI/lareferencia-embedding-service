@@ -41,3 +41,5 @@ bin/
 /README-AI.md
 /.vscode/settings.json
 /.vscode/extensions.json
+files/
+.venv/

@@ -80,23 +80,19 @@ class GenerationIntegrationTest {
     assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM dvp."+f.table()+" WHERE document_id=?",Integer.class,doc));
     assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=? AND prepared_text IS NOT NULL",Integer.class,doc));
     var page=retrieval.get(f.collection().toString(),f.indexation().toString(),doc.toString(),false,new org.springframework.util.LinkedMultiValueMap<>());
-    assertEquals(2,((List<?>)page.get("items")).size());
-    var descriptor=(Map<?,?>)((Map<?,?>)page.get("indexations")).get(f.indexation().toString());
-    var coverage=(Map<?,?>)descriptor.get("coverage");assertEquals("complete",coverage.get("state"));
-    assertEquals(2,((List<?>)coverage.get("texts")).size());
+    assertEquals(2,((List<?>)page.get("data")).size());
+    assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM dvp.text_indexation_progress p JOIN dvp.source_texts s ON s.id=p.source_id WHERE p.indexation_id=? AND s.document_id=? AND p.state='complete' AND p.revision=s.revision",Integer.class,f.indexation(),doc));
     var query=mapper.readTree("{\"query\":{\"vector\":[1,2]},\"mode\":\"exact\",\"result_unit\":\"unit\"}");
     assertEquals(2,((List<?>)search.search(f.collection().toString(),f.indexation().toString(),query).get("results")).size());
     jdbc.update("UPDATE dvp.source_texts SET content='changed',revision=revision+1 WHERE document_id=? AND kind='title'",doc);
-    var changed=retrieval.get(f.collection().toString(),f.indexation().toString(),doc.toString(),false,new org.springframework.util.LinkedMultiValueMap<>());
-    var changedCoverage=(Map<?,?>)((Map<?,?>)((Map<?,?>)changed.get("indexations")).get(f.indexation().toString())).get("coverage");
-    assertEquals("partial",changedCoverage.get("state"));assertEquals(1,changedCoverage.get("unprepared_texts"));
+    assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.text_indexation_progress p JOIN dvp.source_texts s ON s.id=p.source_id WHERE p.indexation_id=? AND s.document_id=? AND p.revision<>s.revision",Integer.class,f.indexation(),doc));
     jdbc.execute("CREATE INDEX "+f.table()+"_ann ON dvp."+f.table()+" USING hnsw (embedding vector_cosine_ops)");
     jdbc.update("UPDATE dvp.indexations SET ann_state='ready' WHERE id=?",f.indexation());
     ((com.fasterxml.jackson.databind.node.ObjectNode)query).put("mode","approximate");
     assertEquals(2,((List<?>)search.search(f.collection().toString(),f.indexation().toString(),query).get("results")).size());
     jdbc.update("DELETE FROM dvp.source_texts WHERE document_id=?",doc);
     assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM dvp."+f.table()+" WHERE document_id=?",Integer.class,doc));
-    assertEquals(2,((List<?>)retrieval.get(f.collection().toString(),f.indexation().toString(),doc.toString(),false,new org.springframework.util.LinkedMultiValueMap<>()).get("items")).size());
+    assertEquals(2,((List<?>)retrieval.get(f.collection().toString(),f.indexation().toString(),doc.toString(),false,new org.springframework.util.LinkedMultiValueMap<>()).get("data")).size());
   }
   @Test void importOnlyCannotGenerateAndHalfvecOverflowFailsWithoutVector() throws Exception {
     Fixture imported=fixture("import_only","none","{\"mode\":\"none\"}");submit(imported,"{}",409);

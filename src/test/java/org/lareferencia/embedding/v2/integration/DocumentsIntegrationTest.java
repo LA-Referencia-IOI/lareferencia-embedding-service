@@ -76,6 +76,9 @@ class DocumentsIntegrationTest {
     mvc.perform(get(base(c)+"/by-external-id").param("external_id",external))
         .andExpect(status().isOk()).andExpect(header().string("ETag","\"1\""))
         .andExpect(jsonPath("$.id").value(item.path("id").asText()));
+    mvc.perform(get(base(c)).param("external_id",external)).andExpect(status().isBadRequest());
+    mvc.perform(get(base(c)).param("external_id",external).param("limit","1")).andExpect(status().isBadRequest());
+    mvc.perform(get(base(c)+"/by-external-id").param("external_id","missing")).andExpect(status().isNotFound());
     assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.documents WHERE collection_id=?",Integer.class,c));
   }
 

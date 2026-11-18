@@ -41,6 +41,7 @@ The active configuration defines the provider reference `ollama-gpu-ibict` as `O
 
 | Resource | Path |
 | --- | --- |
+| Service home | `GET /` |
 | Swagger UI | `GET /swagger-ui/index.html` |
 | OpenAPI JSON | `GET /api-docs` |
 | Swagger configuration | `GET /api-docs/swagger-config` |
@@ -76,7 +77,7 @@ flowchart TD
 3. Configure a provider and create an HTTP profile with the correct model, revision, and dimensions. Use `import_only` for externally produced vectors without HTTP inference.
 4. Create an indexation with the collection and profile. Its response has an indexation `Location` and a provisioning `job_id`. Wait for the job and confirm `state=ready`; this does not mean vectors exist.
 5. Submit a generation job per indexation for selected documents or the collection. It prepares units from the texts currently selected by the indexation and creates missing vectors for those units.
-6. Inspect the job, item errors, counters, and document coverage. `succeeded` alone does not mean a particular document produced a vector.
+6. Inspect the job, item errors, counters, and retrieved vectors. `succeeded` alone does not mean a particular document produced a vector.
 7. Retrieve vectors or search. Approximate search needs a compatible ready ANN index. PostgreSQL maintains an existing HNSW index as new vectors are inserted; do not run `build_ann` for each vector.
 
 Empty `selection.kinds` or `selection.languages` means **all** kinds or languages. An indexation named `abstracts` with `kinds: []` also selects titles; specify `["abstract"]` to select only abstracts. `chunking.mode=none` yields one unit per selected text. `characters-v1` may yield multiple chunks; for example `{"mode":"characters-v1","max_chars":2000,"overlap_chars":200}` uses code-point windows and overlap, not a token limit.
@@ -145,7 +146,7 @@ Example response **200** (fields may be omitted here for brevity):
 
 ### `GET /api/v2/collections/{id}`
 
-Returns one collection.
+Returns one collection and exact counts from the same database snapshot. `documents` counts documents in the collection; `indexations` counts its indexations in all states. Exact counts can take longer for large collections.
 
 Request:
 
@@ -156,8 +157,12 @@ curl "$BASE/api/v2/collections/$C"
 Example response **200** (fields may be omitted here for brevity):
 
 ```json
-{"id":"11111111-1111-4111-8111-111111111111","slug":"research","name":"Open Research","created_at":"2026-11-12T12:00:00Z"}
+{"id":"11111111-1111-4111-8111-111111111111","slug":"research","name":"Open Research","created_at":"2026-11-12T12:00:00Z","counts":{"documents":125,"indexations":2}}
 ```
+
+The `counts` object is added to the collection detail response only; collection creation and listing retain their existing shape. No migration or reindexing is needed. To roll back, deploy the previous application version; clients should tolerate the absence of `counts` during rollback.
+
+Clients using the removed `GET /documents?external_id=...` route must switch to `/documents/by-external-id?external_id=...`. Clients using the removed indexation-scoped `/document-vectors?external_id=...` route must switch to `/vectors?external_id=...`. No database migration or reindexing is needed; rollback requires deploying the previous application version.
 
 ## 6. Documents and source texts
 
@@ -217,7 +222,7 @@ Example response **200** (fields may be omitted here for brevity):
 {"id":"22222222-2222-4222-8222-222222222222","external_id":"example:article-001","revision":1,"metadata":{"title":"Open access to research"}}
 ```
 
-### `GET /api/v2/collections/{c}/documents/by-external-id`
+### `GET /api/v2/collections/{c}/documents/by-external-id?external_id={external_id}`
 
 Returns the same representation and `ETag` using the exact external ID.
 
@@ -542,63 +547,29 @@ Example response **202** (fields may be omitted here for brevity):
 
 ## 11. Retrieve document vectors
 
-These read-only endpoints never generate or prepare vectors. They accept `limit`, `cursor`, and `include=texts,metadata`; embeddings are always returned. Without `include`, text bodies and metadata are omitted. Each response uses one snapshot; pages can observe later changes.
-
-The following abbreviated response illustrates the shape for all four routes. Its `embedding` is omitted because the example profile has 1024 dimensions; each real item includes that array:
-
-```json
-{"document":{"id":"22222222-2222-4222-8222-222222222222","external_id":"example:article-001","revision":1},"indexations":{"44444444-4444-4444-8444-444444444444":{"profile_id":"33333333-3333-4333-8333-333333333333","model":"bge-m3","model_revision":"deployment-2026-11","dimensions":1024,"coverage":{"state":"complete","eligible_texts":1,"unprepared_texts":0,"texts":[{"knd":"abstract","lng":"en","ordinal":0,"revision":1,"state":"complete","expected_units":1}],"prepared_units":1,"current_vectors":1,"missing_vectors":0}}},"items":[{"indexation_id":"44444444-4444-4444-8444-444444444444","profile_id":"33333333-3333-4333-8333-333333333333","unit_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","ordinal":0,"start_cp":0,"end_cp":18,"origin":"generated"}],"next_cursor":null}
-```
-
-For the format of `embedding`, this separate item illustrates a three-dimensional profile, not the 1024-dimensional bge-m3 profile:
-
-```json
-{"indexation_id":"44444444-4444-4444-8444-444444444444","profile_id":"33333333-3333-4333-8333-333333333333","unit_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","ordinal":0,"start_cp":0,"end_cp":18,"origin":"generated","embedding":[0.12,-0.03,0.45]}
-```
-
-### `GET /api/v2/collections/{c}/documents/{d}/vectors`
-
-Request:
-
-```bash
-curl "$BASE/api/v2/collections/$C/documents/$D/vectors?include=texts,metadata"
-```
-
-Response **200** uses the shape above and includes `unavailable_indexation_ids` for the all-indexations route.
-
-### `GET /api/v2/collections/{c}/document-vectors`
-
-Request:
-
-```bash
-curl --get "$BASE/api/v2/collections/$C/document-vectors" --data-urlencode 'external_id=example:article-001'
-```
-
-Response **200** uses the shape above and includes `unavailable_indexation_ids` for the all-indexations route.
+Retrieval requires a ready indexation and returns stored vectors in an OpenAI-style embedding list. The default response contains **all** vectors for the document and indexation. The model is the model identifier from the indexation's profile; it can differ from a provider's model alias. This endpoint does not perform inference and does not have token usage information, so `usage` is omitted. `index` is zero-based within the returned list.
 
 ### `GET /api/v2/collections/{c}/indexations/{i}/documents/{d}/vectors`
-
-Request:
 
 ```bash
 curl "$BASE/api/v2/collections/$C/indexations/$I/documents/$D/vectors"
 ```
 
-Response **200** uses the shape above; an unavailable indexation returns 409.
-
-### `GET /api/v2/collections/{c}/indexations/{i}/document-vectors`
-
-Request:
+### `GET /api/v2/collections/{c}/indexations/{i}/vectors?external_id={external_id}`
 
 ```bash
-curl --get "$BASE/api/v2/collections/$C/indexations/$I/document-vectors" --data-urlencode 'external_id=example:article-001'
+curl --get "$BASE/api/v2/collections/$C/indexations/$I/vectors" --data-urlencode 'external_id=example:article-001'
 ```
 
-Response **200** uses the shape above; an unavailable indexation returns 409.
+Both routes return the same shape; for example, for a three-dimensional profile:
 
-Imported vector items contain their external embedding `id`. Generated units can include the prepared text snapshot when `include=texts` is requested; they do not identify an individual source text. `coverage.document_vectors` counts imported document vectors. A separate marker records each selected text's revision and progress for that indexation: `pending` means not prepared for the current revision, `prepared` means units were prepared, and `complete` means generation for the document finished successfully. `expected_units` counts chunks and is null until preparation. Texts are identified in this list by kind, language and zero-based occurrence within that group; the marker does not link any vector to a text. A changed text becomes pending; old document vectors remain. Completion is conservative: a failed document job does not mark its prepared texts complete, even if some vectors were stored. Externally imported document vectors do not establish per-text coverage. `missing_vectors` counts all stored prepared units without vectors, including units retained from earlier content. An existing document with no vectors returns 200 and empty `items`; a missing document returns 404.
+```json
+{"object":"list","data":[{"object":"embedding","embedding":[0.12,-0.03,0.45],"index":0},{"object":"embedding","embedding":[0.09,0.02,0.35],"index":1}],"model":"example-model"}
+```
 
-Text progress `complete` indicates stored vectors, not that an ANN index has been built. Check the indexation's `ann_state` separately before approximate search.
+An existing document without vectors returns `data: []`. A missing document or indexation returns 404; an unavailable indexation returns 409. Optionally set `limit` from 1 to 1000 to page large results: the response then includes `next_cursor`, which is null on the last page. Send the cursor and a limit on subsequent requests; `index` restarts at zero for each page. Each page uses a separate snapshot. Previously issued cursors without projections remain usable with an explicit limit.
+
+**Compatibility:** This response replaces `document`, `indexations`, `items`, coverage, and per-vector identifiers with `object`, `data`, and `model`; `include` is no longer supported. Clients must update their parsing and use document endpoints for document details. Retrieving all vectors may produce a large response; use `limit` when necessary. No database migration or reindexing is required. Roll back by deploying the previous application version and updating clients accordingly.
 
 ## 12. Semantic search
 
@@ -620,7 +591,25 @@ Example response **200** (fields may be omitted here for brevity):
 {"indexation_id":"44444444-4444-4444-8444-444444444444","profile_id":"33333333-3333-4333-8333-333333333333","metric":"cosine","mode":"exact","result_unit":"document","requested":10,"returned":1,"shortfall_reason":"exhausted","recall_guaranteed":true,"results":[{"document_id":"22222222-2222-4222-8222-222222222222","external_id":"example:article-001","unit_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","distance":0.08,"text":"Open access research.","metadata":{"year":2024}}]}
 ```
 
-Alternatively supply `query.vector` with exactly the profile's dimensions. The client is responsible for matching its model, revision, and preparation space. `import_only` profiles accept external vectors but reject text with 409 `profile_not_executable`.
+For an indexation with an `import_only` profile, a text query can specify a separate HTTP profile in `query.profile_id`:
+
+```bash
+curl -X POST "$BASE/api/v2/collections/$C/indexations/$I/search" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":{"text":"open research data","profile_id":"<HTTP_PROFILE_UUID>"},"mode":"exact","top_n":10,"result_unit":"document"}'
+```
+
+The query profile must match the indexation profile's model and dimensions. Its execution mode must be `http` and its provider must be configured. Missing profiles return 404 and incompatible profiles return 409 `incompatible_query_profile`. The query profile supplies the query preparation recipe. Revisions and preparation recipes can differ, so the caller must verify that the provider produces vectors compatible with the indexed vectors. The indexation remains bound to its original profile, which is reported as `profile_id` in the response.
+
+When a provider uses a different model name from the profile's canonical name, configure an explicit provider-specific alias in `application.properties`:
+
+```properties
+app.dvp.providers.ollama-gpu-ibict.model-aliases[google/embeddinggemma-2]=embeddinggemma-2:270m
+```
+
+The service sends the mapped name to that provider while retaining the profile's canonical model for compatibility checks. Restart the application after changing provider configuration. The mapping asserts that both names refer to compatible model weights and output dimensions; verify the actual model and revision before using it.
+
+Alternatively supply `query.vector` with exactly the indexation profile's dimensions. The client is responsible for matching its model, revision, and preparation space. `query.profile_id` applies only to text queries. Without it, `import_only` profiles reject text with 409 `profile_not_executable`.
 
 Defaults: `top_n=10` (1–100), `result_unit=document` (or `unit`), `mode=approximate`, and empty `include`. Results sort by ascending distance, document UUID, then unit UUID. Exact mode evaluates current vectors and finds each document's global best unit before limiting; a shortfall is `exhausted`. Approximate mode requires ready ANN, expands candidates, reranks float32 values, reports `recall_guaranteed:false`, and reports `candidate_limit` on shortfall. It does not silently fall back to exact. Halfvec admission rejects overflow and cosine vectors that round to zero.
 

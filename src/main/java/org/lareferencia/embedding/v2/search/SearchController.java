@@ -15,7 +15,7 @@ public class SearchController {
   private final SearchService service;
   public SearchController(SearchService service) {this.service=service;}
   @PostMapping
-  @Operation(summary="Search one index configuration",description="Exact or approximate vector/text search; optional texts and metadata projections.")
+  @Operation(summary="Search one index configuration",description="Exact or approximate search. Text queries can specify query.profile_id for a compatible HTTP embedding profile; optional texts and metadata projections.")
   public Map<String,Object> search(@PathVariable String collection,@PathVariable String indexation,@RequestBody JsonNode request,@RequestParam MultiValueMap<String,String> query) {
     if(!query.isEmpty())throw org.lareferencia.embedding.v2.common.V2Exception.badRequest("Unknown query parameter");
     return service.search(collection,indexation,request);

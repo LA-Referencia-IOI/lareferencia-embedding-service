@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LA Referencia Embedding Service</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.5; }
+    body { max-width: 58rem; margin: 0 auto; padding: 2rem 1.25rem; }
+    h1 { margin-bottom: .25rem; }
+    p { margin-top: .4rem; }
+    ul { list-style: none; padding: 0; display: grid; gap: .8rem; }
+    li { border: 1px solid; border-radius: .5rem; padding: .9rem 1rem; }
+    a { font-weight: 600; overflow-wrap: anywhere; }
+    code { font-size: .9em; overflow-wrap: anywhere; }
+    li p { margin: .3rem 0 0; }
+    a:focus-visible { outline: 3px solid; outline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>LA Referencia Embedding Service</h1>
+    <p>API documentation and operational endpoints.</p>
+    <ul>
+      <li><a href="/swagger-ui/index.html">Swagger UI</a><p>Browse and try the API. <code>GET /swagger-ui/index.html</code></p></li>
+      <li><a href="/api-docs">OpenAPI JSON</a><p>Read the API specification. <code>GET /api-docs</code></p></li>
+      <li><a href="/api-docs/swagger-config">Swagger configuration</a><p>Read the Swagger UI configuration. <code>GET /api-docs/swagger-config</code></p></li>
+      <li><a href="/actuator/health">Health</a><p>Check application health. <code>GET /actuator/health</code></p></li>
+      <li><a href="/actuator/metrics">Metrics</a><p>List available metrics. <code>GET /actuator/metrics</code></p></li>
+      <li><a href="/actuator/metrics/jvm.memory.used">Example metric: JVM memory used</a><p>Replace the name in <code>GET /actuator/metrics/{name}</code> with a name from the metrics list.</p></li>
+    </ul>
+  </main>
+</body>
+</html>

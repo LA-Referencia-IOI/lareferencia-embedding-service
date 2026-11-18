@@ -73,6 +73,25 @@ class CollectionsIntegrationTest {
     mvc.perform(get(PATH).param("limit","1","2")).andExpect(status().isBadRequest());
     mvc.perform(get(PATH).param("include","metadata")).andExpect(status().isBadRequest());
   }
+  @Test void collectionDetailsCountDocumentsAndIndexations() throws Exception {
+    String id=json(create(UUID.randomUUID().toString(),body("counts-"+UUID.randomUUID(),"Counts"),201)).path("id").asText();
+    String other=json(create(UUID.randomUUID().toString(),body("counts-"+UUID.randomUUID(),"Other"),201)).path("id").asText();
+    UUID c=UUID.fromString(id),otherCollection=UUID.fromString(other);
+    mvc.perform(get(PATH+"/"+id)).andExpect(status().isOk()).andExpect(jsonPath("$.counts.documents").value(0))
+        .andExpect(jsonPath("$.counts.indexations").value(0)).andExpect(jsonPath("$.counts.embedding_profiles").doesNotExist());
+    for(int n=0;n<2;n++)jdbc.update("INSERT INTO dvp.documents(id,collection_id,external_id) VALUES (?,?,?)",UUID.randomUUID(),c,"doc-"+n);
+    jdbc.update("INSERT INTO dvp.documents(id,collection_id,external_id) VALUES (?,?,'other')",UUID.randomUUID(),otherCollection);
+    UUID first=UUID.randomUUID(),second=UUID.randomUUID(),unused=UUID.randomUUID();
+    for(UUID profile:List.of(first,second,unused))jdbc.update("INSERT INTO dvp.embedding_profiles(id,slug,model,model_revision,dimensions,execution_mode,preparation,fingerprint) VALUES (?,?,?,'v1',2,'import_only','{}',?)",profile,"p-"+profile,"model",profile.toString().replace("-","").repeat(2));
+    for(int n=0;n<4;n++) {
+      UUID index=UUID.randomUUID();UUID owner=n==3?otherCollection:c;UUID profile=n==2?second:first;
+      jdbc.update("INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state) VALUES (?,?,?,?,'{}','{\"mode\":\"none\"}','cosine','none',?,?, 'disabled')",index,owner,"idx-"+n,profile,"vec_"+index.toString().replace("-",""),n==1?"failed":"ready");
+    }
+    mvc.perform(get(PATH+"/"+id)).andExpect(status().isOk()).andExpect(jsonPath("$.counts.documents").value(2))
+        .andExpect(jsonPath("$.counts.indexations").value(3)).andExpect(jsonPath("$.counts.embedding_profiles").doesNotExist());
+    mvc.perform(get(PATH+"/"+other)).andExpect(status().isOk()).andExpect(jsonPath("$.counts.documents").value(1))
+        .andExpect(jsonPath("$.counts.indexations").value(1));
+  }
   @Test void strictJsonErrorsLimitsAndMissingResourcesUseV2Shape() throws Exception {
     for(String content:List.of("{}","{\"slug\":\"UPPER\",\"name\":\"Name\"}",
         "{\"slug\":123,\"name\":456}",
@@ -126,5 +145,6 @@ class CollectionsIntegrationTest {
     assertTrue(post.path("parameters").toString().contains("Idempotency-Key"));
     assertTrue(post.path("responses").has("201"));
     assertTrue(schema.path("components").path("schemas").path("CollectionResource").path("properties").has("created_at"));
+    assertTrue(schema.path("components").path("schemas").path("CollectionDetails").path("properties").has("counts"));
   }
 }

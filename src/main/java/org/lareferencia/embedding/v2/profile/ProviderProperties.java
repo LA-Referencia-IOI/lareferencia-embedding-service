@@ -19,6 +19,7 @@ public class ProviderProperties {
     private Duration requestTimeout=Duration.ofSeconds(30);
     private int concurrency=4;
     private int batchSize=128;
+    private Map<String,String> modelAliases=new LinkedHashMap<>();
     @Override public String toString() { return "Provider[redacted]"; }
   }
 }

@@ -164,6 +164,12 @@ a server reboot.
 
 ## API
 
+The service home page links to API documentation and operational endpoints:
+
+```text
+http://localhost:8989/
+```
+
 Swagger UI is available when the service is running:
 
 ```text

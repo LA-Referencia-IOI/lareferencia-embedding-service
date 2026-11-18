@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
 @Component
 @ConditionalOnProperty(name="app.dvp.enabled",havingValue="true")
 public class ProviderRegistry {
-  private record Connection(String type,URI endpoint,String secretRef,Duration timeout,int batchSize,
+  private record Connection(String type,URI endpoint,String secretRef,Duration timeout,int batchSize,Map<String,String> modelAliases,
       Semaphore slots,HttpClient client) {}
   private final Map<String,Connection> providers;
   private final ThreadPoolExecutor executor;
@@ -36,7 +36,9 @@ public class ProviderRegistry {
             p.getConnectTimeout().isNegative() || p.getRequestTimeout()==null || p.getRequestTimeout().isZero() ||
             p.getRequestTimeout().isNegative() || (p.getSecretRef()!=null && !p.getSecretRef().matches("[A-Za-z_][A-Za-z0-9_]*")))
           throw new IllegalArgumentException();
-        configured.put(name,new Connection(p.getType(),uri,p.getSecretRef(),p.getRequestTimeout(),p.getBatchSize(),
+        if(p.getModelAliases()==null || p.getModelAliases().entrySet().stream().anyMatch(e->e.getKey()==null || e.getKey().isBlank() || e.getValue()==null || e.getValue().isBlank()))
+          throw new IllegalArgumentException();
+        configured.put(name,new Connection(p.getType(),uri,p.getSecretRef(),p.getRequestTimeout(),p.getBatchSize(),Map.copyOf(p.getModelAliases()),
             new Semaphore(p.getConcurrency()),HttpClient.newBuilder().connectTimeout(p.getConnectTimeout()).build()));
       } catch(RuntimeException e) { throw new IllegalArgumentException("Invalid v2 provider configuration for reference: "+name); }
     });
@@ -85,7 +87,7 @@ public class ProviderRegistry {
   }
   private List<float[]> call(Connection c,ProfileResource profile,List<String> inputs) {
     try {
-      var body=mapper.createObjectNode().put("model",profile.model());
+      var body=mapper.createObjectNode().put("model",c.modelAliases().getOrDefault(profile.model(),profile.model()));
       body.set("input",mapper.valueToTree(inputs));
       if(c.type().equals("OPENAI_COMPATIBLE")) body.put("dimensions",profile.dimensions());
       var builder=HttpRequest.newBuilder(c.endpoint()).timeout(c.timeout()).header("Content-Type","application/json")

@@ -30,8 +30,13 @@ public class SearchService {
   }
   public Map<String,Object> search(String collection,String indexation,JsonNode request) {
     UUID c=uuid(collection),i=uuid(indexation);fields(request,Set.of("query","top_n","result_unit","mode","include"));
-    JsonNode query=request.get("query");fields(query,Set.of("text","vector"));
+    JsonNode query=request.get("query");fields(query,Set.of("text","vector","profile_id"));
     boolean hasText=query.has("text"),hasVector=query.has("vector");if(hasText==hasVector)throw V2Exception.badRequest("Provide exactly one query text or vector");
+    UUID queryProfileId=null;
+    if(query.has("profile_id")) {
+      if(!hasText || !query.get("profile_id").isTextual())throw V2Exception.badRequest("profile_id requires a text query and a UUID");
+      queryProfileId=uuid(query.get("profile_id").textValue());
+    }
     int top=10;if(request.has("top_n")){JsonNode n=request.get("top_n");if(!n.isIntegralNumber()||!n.canConvertToInt())throw V2Exception.badRequest("Invalid top_n");top=n.intValue();}
     if(top<1||top>100)throw V2Exception.badRequest("Invalid top_n");
     String unit=option(request,"result_unit","document",Set.of("document","unit"));String mode=option(request,"mode","approximate",Set.of("exact","approximate"));
@@ -44,8 +49,14 @@ public class SearchService {
       if(hasText) {
         var value=query.get("text");if(!value.isTextual())throw V2Exception.badRequest("Invalid query text");String text=value.textValue();
         if(text.codePointCount(0,text.length())>props.getMaxQueryCodePoints())throw new V2Exception(422,"invalid_input","Query exceeds its limit");
-        if(!profile.inferenceCapable())throw new V2Exception(409,"profile_not_executable","Profile has no inference capability");
-        vector=providers.embed(profile,List.of(preparation.query(profile,text,props.getMaxQueryCodePoints()))).getFirst();
+        ProfileResource queryProfile=profile;
+        if(queryProfileId!=null) {
+          queryProfile=profiles.find(queryProfileId).orElseThrow(()->new V2Exception(404,"profile_not_found","Query profile does not exist"));
+          if(!profile.model().equals(queryProfile.model()) || profile.dimensions()!=queryProfile.dimensions())
+            throw new V2Exception(409,"incompatible_query_profile","Query profile is incompatible with the indexation profile");
+        }
+        if(!queryProfile.inferenceCapable())throw new V2Exception(409,"profile_not_executable","Profile has no inference capability");
+        vector=providers.embed(queryProfile,List.of(preparation.query(queryProfile,text,props.getMaxQueryCodePoints()))).getFirst();
         vector=validator.validate(mapper.valueToTree(vector),profile.dimensions(),config.metric(),mode.equals("approximate")?config.strategy():"none");
       } else vector=validator.validate(query.get("vector"),profile.dimensions(),config.metric(),mode.equals("approximate")?config.strategy():"none");
       String value=Arrays.toString(vector);int requested=top;long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(mode.equals("exact")?props.getExactTimeoutSeconds():props.getApproximateTimeoutSeconds());
