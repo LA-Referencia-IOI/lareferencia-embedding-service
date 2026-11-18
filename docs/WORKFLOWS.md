@@ -10,6 +10,8 @@ The workflows create separate collections. Workflows 1 and 2 can reuse the same 
 
 ## Common prerequisites
 
+Install the consolidated schema on a new database or use the documented v1 upgrade procedure. See [Install v2 or upgrade from v1](PLATFORM-GUIDE.md#install-v2-or-upgrade-from-v1).
+
 Before starting a workflow:
 
 - The application is running at `http://localhost:8989` with PostgreSQL and pgvector >= 0.8.0 available. The API process has `DVP_ENABLED=true` and role `API` or `ALL`.

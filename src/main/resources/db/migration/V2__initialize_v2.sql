@@ -1,4 +1,4 @@
--- Static v2 registry only; dynamic vector tables are provisioned by later maintenance jobs.
+-- Static v2 registry. The application provisions vector tables on demand.
 CREATE SCHEMA dvp;
 
 CREATE TABLE dvp.collections (
@@ -73,19 +73,24 @@ CREATE TABLE dvp.vector_units (
     collection_id uuid NOT NULL,
     indexation_id uuid NOT NULL,
     document_id uuid NOT NULL,
-    source_text_id uuid NOT NULL,
-    source_revision bigint NOT NULL CHECK (source_revision > 0),
     ordinal integer NOT NULL CHECK (ordinal >= 0),
-    start_cp integer NOT NULL CHECK (start_cp >= 0),
-    end_cp integer NOT NULL CHECK (end_cp > start_cp),
-    input_hash char(64) NOT NULL,
+    start_cp integer CHECK (start_cp >= 0),
+    end_cp integer CHECK (end_cp > start_cp),
+    input_hash char(64),
+    embedding_key varchar(200),
+    prepared_text text,
+    prepared_key varchar(100),
     FOREIGN KEY (indexation_id, collection_id) REFERENCES dvp.indexations(id, collection_id),
     FOREIGN KEY (document_id, collection_id) REFERENCES dvp.documents(id, collection_id) ON DELETE CASCADE,
-    FOREIGN KEY (source_text_id, document_id) REFERENCES dvp.source_texts(id, document_id) ON DELETE CASCADE,
-    UNIQUE (indexation_id, source_text_id, source_revision, ordinal),
-    UNIQUE (id, document_id, source_text_id, source_revision, indexation_id)
+    CONSTRAINT vector_units_identity UNIQUE (id, document_id, indexation_id),
+    CONSTRAINT vector_units_document_embedding_key UNIQUE (indexation_id, document_id, embedding_key),
+    CONSTRAINT vector_units_snapshot_check CHECK (
+        (prepared_key IS NULL AND prepared_text IS NULL AND embedding_key IS NOT NULL)
+        OR (prepared_key IS NOT NULL AND prepared_text IS NOT NULL AND embedding_key IS NULL AND input_hash IS NOT NULL)
+    )
 );
-CREATE INDEX units_source ON dvp.vector_units(source_text_id);
+CREATE UNIQUE INDEX units_document_prepared_key
+    ON dvp.vector_units(indexation_id, document_id, prepared_key) WHERE prepared_key IS NOT NULL;
 CREATE INDEX units_document ON dvp.vector_units(document_id, indexation_id);
 CREATE INDEX units_indexation ON dvp.vector_units(indexation_id, id);
 
@@ -106,9 +111,11 @@ CREATE TABLE dvp.jobs (
     attempts integer NOT NULL DEFAULT 0,
     available_at timestamptz NOT NULL DEFAULT now(),
     created_at timestamptz NOT NULL DEFAULT now(),
-    finished_at timestamptz
+    finished_at timestamptz,
+    global_error_code varchar(80)
 );
 CREATE INDEX jobs_claim ON dvp.jobs(status, available_at, lease_until);
+CREATE INDEX jobs_parent ON dvp.jobs(parent_job_id);
 
 CREATE TABLE dvp.import_files (
     job_id uuid PRIMARY KEY REFERENCES dvp.jobs(id),
@@ -131,9 +138,11 @@ CREATE TABLE dvp.job_items (
     lease_until timestamptz,
     fencing_token bigint NOT NULL DEFAULT 0,
     attempts integer NOT NULL DEFAULT 0,
+    next_attempt_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (job_id, item_key)
 );
 CREATE INDEX job_items_claim ON dvp.job_items(job_id, status, lease_until);
+CREATE INDEX job_items_due ON dvp.job_items(job_id, status, next_attempt_at, item_key);
 
 CREATE TABLE dvp.idempotency_requests (
     scope varchar(200) NOT NULL,
@@ -141,12 +150,22 @@ CREATE TABLE dvp.idempotency_requests (
     request_hash char(64) NOT NULL,
     response_status integer NOT NULL,
     response_body jsonb NOT NULL,
+    response_headers jsonb NOT NULL DEFAULT '{}',
+    job_id uuid REFERENCES dvp.jobs(id),
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (scope, request_key)
 );
 
--- Replay headers and active-job retention are persisted alongside the atomic response.
-ALTER TABLE dvp.idempotency_requests
-    ADD COLUMN response_headers jsonb NOT NULL DEFAULT '{}',
-    ADD COLUMN job_id uuid REFERENCES dvp.jobs(id);
 CREATE INDEX idempotency_retention ON dvp.idempotency_requests(created_at);
+
+-- Progress is tracked separately from document-owned vector units.
+CREATE TABLE dvp.text_indexation_progress (
+    indexation_id uuid NOT NULL REFERENCES dvp.indexations(id) ON DELETE CASCADE,
+    source_id uuid NOT NULL REFERENCES dvp.source_texts(id) ON DELETE CASCADE,
+    revision bigint NOT NULL CHECK (revision > 0),
+    expected_units integer NOT NULL CHECK (expected_units > 0),
+    state varchar(16) NOT NULL CHECK (state IN ('prepared','complete')),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (indexation_id, source_id)
+);
+CREATE INDEX text_indexation_progress_source ON dvp.text_indexation_progress(source_id);

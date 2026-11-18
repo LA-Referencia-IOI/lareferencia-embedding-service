@@ -30,7 +30,7 @@ Java 21, PostgreSQL with administrator-installed pgvector >= 0.8.0, and an appro
 | `DVP_IMPORT_FILE_ROOT` | Durable directory shared by import API and worker instances. |
 | `app.dvp.providers.<reference>.*` | Provider type, endpoint, resource limits, and secret reference. |
 
-The active standalone configuration defaults `DVP_ENABLED`, `DVP_IMPORT_ENABLED`, and `DVP_WORKERS_ENABLED` to true, and `DVP_ROLE` to `ALL`; Compose defaults them to false, false, false, and `API`. `application.properties.example` is documentation, not an automatically loaded configuration. For a local API and worker using an already configured database:
+Copy `src/main/resources/application.properties.example` to the local, ignored `application.properties` if you use Maven. Compose defaults the three feature flags to false and the role to `API`. For a local API and worker using an already configured database:
 
 ```bash
 DVP_ENABLED=true DVP_IMPORT_ENABLED=true DVP_WORKERS_ENABLED=true DVP_ROLE=ALL \
@@ -598,8 +598,6 @@ Response **200** uses the shape above; an unavailable indexation returns 409.
 
 Imported vector items contain their external embedding `id`. Generated units can include the prepared text snapshot when `include=texts` is requested; they do not identify an individual source text. `coverage.document_vectors` counts imported document vectors. A separate marker records each selected text's revision and progress for that indexation: `pending` means not prepared for the current revision, `prepared` means units were prepared, and `complete` means generation for the document finished successfully. `expected_units` counts chunks and is null until preparation. Texts are identified in this list by kind, language and zero-based occurrence within that group; the marker does not link any vector to a text. A changed text becomes pending; old document vectors remain. Completion is conservative: a failed document job does not mark its prepared texts complete, even if some vectors were stored. Externally imported document vectors do not establish per-text coverage. `missing_vectors` counts all stored prepared units without vectors, including units retained from earlier content. An existing document with no vectors returns 200 and empty `items`; a missing document returns 404.
 
-Flyway V7 creates progress markers without modifying existing vectors. Existing texts remain pending until a generation job records their current revision; a generation job can reuse existing vectors. Roll back the application and database together if reverting across V7.
-
 Text progress `complete` indicates stored vectors, not that an ANN index has been built. Check the indexation's `ann_state` separately before approximate search.
 
 ## 12. Semantic search
@@ -749,7 +747,22 @@ Restore first to an isolated new database and volume using compatible PostgreSQL
 
 For application rollback, disable v2 traffic and workers, safely stop uploads, and restore a compatible earlier application while retaining schema, data, indexes, jobs, and files. Do not drop schemas, run destructive migrations, or prune volumes as an application rollback. No v1 reindex is needed for the additive changes. Model, revision, preparation, metric, or dimension changes require a new profile/indexation and explicit generation or import.
 
-Before upgrading a legacy database without Flyway history, rehearse on an authorized copy: back up, inspect `stores`, check duplicates, verify the extension, and plan version-1 baseline and V2–V8 migrations. **The active configuration currently sets `spring.flyway.baseline-on-migrate=true` and `baseline-version=1`**, so startup can automatically baseline a nonempty database without history. Do not start against an existing database until its schema and these settings are explicitly verified. Set `spring.flyway.baseline-on-migrate=false` during inspection if automatic baselining must be prevented. Start with v2 disabled, test v1, enable v2 in stages, and verify rollback while preserving data.
+### Install v2 or upgrade from v1
+
+The v2 distribution ships two Flyway migrations. `V1__initialize_v1.sql` creates or verifies the v1 store registry and its case-insensitive indexes. `V2__initialize_v2.sql` creates the final v2 registry. The application provisions vector tables as needed. PostgreSQL must already have pgvector enabled in the target database. Keep Hibernate in `validate` mode.
+
+- **New database.** Start with `SPRING_FLYWAY_BASELINE_ON_MIGRATE=false`. Flyway applies V1 on startup. Set `DVP_ENABLED=true` to expose the v2 API and configure the worker and import flags for the workflows you use.
+- **v1 database without Flyway history.** Verify that `public.stores` matches the v1 schema and that neither `public.flyway_schema_history` nor `dvp` exists. Back up the database, stop v1 writers and rehearse on a copy. Enable baselining **at version 0** for the first v2 startup. This lets Flyway run V1 and V2, which preserve stores and their vector tables. If case-insensitive store names or model/dimension pairs conflict, resolve them before retrying. After a successful startup, disable automatic baselining again.
+- **Database initialized by a development version of v2.** Its Flyway history belongs to the old migration chain. Use a new database for this release and reimport any required data. For a database that must retain its old v2 state, keep the matching build and plan a separate migration. Deleting Flyway history, changing checksums, or baselining at V1 does not perform that upgrade.
+
+For a verified v1 database, the first Maven startup can use the following environment overrides. Supply the existing database connection in your local configuration. With Docker Compose, use the same baseline variables and select the verified database through `DB_URL`, `DB_USER`, and `DB_PASSWORD`.
+
+```bash
+SPRING_FLYWAY_BASELINE_ON_MIGRATE=true SPRING_FLYWAY_BASELINE_VERSION=0 \
+  ./mvnw spring-boot:run
+```
+
+Check that Flyway records successful version `1` and `2` migrations with descriptions `initialize v1` and `initialize v2`. A v1 upgrade also records a version `0` baseline. Verify v1 store reads and, with v2 enabled, list collections before running the [workflows](WORKFLOWS.md). Existing v1 vectors require no reindex. For rollback, stop v2 writes and workers before restoring the pre-upgrade backup and restarting v1.
 
 ### Measured capacity and limitations
 
@@ -768,10 +781,6 @@ docker compose -f docker-compose.test.yml stop
 
 Never point these tests at application or production databases. Implementation evidence, unresolved checks, and approvals are recorded in [IMPLEMENTATION_PLAN.md](coding/IMPLEMENTATION_PLAN.md).
 
-### Migration and compatibility for document-level embeddings
+### Document-level storage
 
-Flyway V5 adds document-level vector-unit identities and makes source references optional for that representation. It alters existing registered vector tables in place and adds scope constraints; it does not require reindexing or intentionally remove existing vectors. Schema changes can lock tables, so rehearse on a database copy and take consistent database/file backups. Text-linked vector generation remains supported; text-linked imports do not. Compact document API changes do not add a schema migration; older explicit-key clients must be updated, and existing explicitly keyed texts need reimport on a fresh database or a separately planned migration. Once document-level rows are written, an older application version cannot be assumed to understand them: disable v2 traffic/workers and restore a compatible database and import-volume backup together for a data rollback; do not drop tables or vectors as an application rollback.
-
-Flyway V6 snapshots the text of existing generated units and removes their source-text association from unit and vector tables. Existing vectors are retained. Prepared snapshots duplicate source content and must receive the same access and retention protections. Existing generated units use migration-specific identities and a later generation may create additional units. For rollback, restore a database backup compatible with the earlier application; V6 is not reversed automatically.
-
-Flyway V8 closes outstanding jobs of the retired preparation kind with `job_kind_unavailable` and keeps their history. Stop old workers before upgrading and use generation jobs for any outstanding documents. No reindex is required. A rollback that needs to resume old preparation jobs requires a backup taken before V8.
+The consolidated schema keeps vector units scoped to a document and indexation. Generated units retain prepared snapshots, which need the same access and retention protections as the original texts. External embeddings use independent identifiers, and revision progress is stored separately. Use the compact document and import formats shown in this guide.

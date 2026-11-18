@@ -40,12 +40,11 @@ For local development, `docker-compose.yml` can start the service and a
 
 ## Configuration
 
-The tracked `src/main/resources/application.properties` loads on a clean checkout.
-Use environment variables for local or container runs. The optional
-`application.example.yml` documents equivalent overrides; ignored
-`src/main/resources/application.yml` is excluded from clean JAR and Docker builds.
-To load a private configuration explicitly, use an external file with
-`--spring.config.additional-location=file:/path/to/application.yml`.
+For a standalone installation, copy `src/main/resources/application.properties.example`
+to `src/main/resources/application.properties` and configure the database and
+provider. The local configuration is ignored by Git. For a packaged JAR, you
+can instead place the configuration outside the project and pass
+`--spring.config.additional-location=file:/path/to/application.properties`.
 
 Docker Compose and the active configuration use the environment variables shown
 below. Spring Boot relaxed binding also accepts equivalent property-style
@@ -103,10 +102,12 @@ not create database schemas or the pgvector extension.
 
 ### Docker Compose
 
-Start the app and local pgvector database:
+On a new installation, start PostgreSQL and enable pgvector before starting the app:
 
 ```bash
-docker compose --profile postgres up --build
+docker compose --profile postgres up -d --wait postgres
+docker compose exec postgres psql -U embeddings -d embeddings -c "CREATE EXTENSION IF NOT EXISTS vector;"
+docker compose up --build app
 ```
 
 With the default Compose settings:
@@ -114,12 +115,6 @@ With the default Compose settings:
 - The service listens on `http://localhost:8989`.
 - PostgreSQL listens on `localhost:5432`.
 - Ollama is expected on the host at `http://host.docker.internal:11434/v1/embeddings`.
-
-Enable pgvector in the Compose database:
-
-```bash
-docker compose exec postgres psql -U embeddings -d embeddings -c "CREATE EXTENSION IF NOT EXISTS vector;"
-```
 
 ### Maven
 
@@ -439,11 +434,9 @@ curl -X POST http://localhost:8989/api/v2/collections \
 Use a new key for a different create request. Reusing the same key with the same
 body replays the original response; reusing it with different content returns 409.
 
-See [Phases 1–3 operations](docs/phases-1-3-operations.md) for the Collections
-contract, limits/pools, explicit legacy Flyway baseline, non-destructive rollback,
-and the opt-in real PostgreSQL integration-test commands. Existing installations
-must follow that baseline procedure before starting this version: automatic
-baselining is disabled, and Hibernate now validates migration-owned tables.
+For the two-migration bootstrap, instructions for upgrading from v1, and
+compatibility with older v2 development databases, see
+[Install v2 or upgrade from v1](docs/PLATFORM-GUIDE.md#install-v2-or-upgrade-from-v1).
 
 The v1 store identity and xxHash/text-normalization behavior are preserved.
 Case-insensitive store uniqueness and model lookup use PostgreSQL `lower(...)`
