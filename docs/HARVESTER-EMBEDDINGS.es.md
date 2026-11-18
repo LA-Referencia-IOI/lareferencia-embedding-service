@@ -8,20 +8,33 @@ a PostgreSQL.
 
 ## 1. Exportar la metadata
 
-En el shell del cosechador, elige el acrónimo de la red y un perfil de
-mapeo que produzca `data.titles` y los resúmenes. El siguiente ejemplo usa
-UY como acrónimo y una ruta de perfil que debes adaptar a tu instalación.
+Para Brasil (`BR`) y Argentina (`AR`) usamos
+`classification-embeddings-v1.json`, con versión declarada **2.0**.
+El nombre del archivo conserva el sufijo `v1`. Comprueba que el
+`mapping.json` incluido en el paquete indique `"version": "2.0"`.
+
+| Campo en `data` | Selector XOAI |
+|---|---|
+| `titles` | `dc.title.*` |
+| `descriptions` | `dc.description.*` |
+| `keywords` | `dc.subject.*` |
+
+Cada ocurrencia conserva su valor y, cuando están disponibles, el idioma
+y el calificador. `descriptions` incluye todos los tipos de descripción.
+El calculador distingue los abstracts por su calificador.
+
+En el shell del cosechador, adapta la ruta de configuración y exporta
+cada red con `--variant original`.
 
 ```text
-export-mapping-validate --mapping /config/exports/mi-perfil.json
-export-metadata-preview --network UY --variant original --mapping /config/exports/mi-perfil.json --limit 5
-export-metadata --network UY --variant original --format jsonl --mapping /config/exports/mi-perfil.json --partition-by network --compression gzip --output /exports
+export-mapping-validate --mapping /config/exports/classification-embeddings-v1.json
+export-metadata-preview --network BR --variant original --mapping /config/exports/classification-embeddings-v1.json --limit 5
+export-metadata --network BR --variant original --format jsonl --mapping /config/exports/classification-embeddings-v1.json --partition-by network --compression gzip --output /exports
+export-metadata --network AR --variant original --format jsonl --mapping /config/exports/classification-embeddings-v1.json --partition-by network --compression gzip --output /exports
 ```
 
-Usa `--variant processed` si quieres partir de la metadata transformada.
-Comprueba en la vista previa cómo se llaman los campos de resumen y si
-incluyen el qualifier de origen. Los perfiles no siempre producen los
-mismos campos.
+Para otra red, sustituye el acrónimo y comprueba con la vista previa que
+el perfil conserva los títulos y resúmenes esperados.
 
 El resultado es una carpeta `exp-…` con estado `COMPLETE` en
 `manifest.json`. Conserva la carpeta completa, incluidas las partes
@@ -57,8 +70,8 @@ caché local, puedes usar `--offline`.
 
 El resultado contiene un `manifest.json` y una parte JSONL comprimida de
 vectores por cada parte de metadata. Por ejemplo, la línea 42 de
-`UY/part-000001.jsonl.gz` corresponde a la línea 42 de
-`UY/part-000001.embeddings.jsonl.gz`. Cada línea contiene un array de
+`BR/part-000001.jsonl.gz` corresponde a la línea 42 de
+`BR/part-000001.embeddings.jsonl.gz`. Cada línea contiene un array de
 vectores. El calculador actual escribe un vector de 768 dimensiones en la
 posición 0, que el manifiesto identifica como `title-abstract`.
 
