@@ -132,6 +132,36 @@ mvn clean package
 java -jar target/lareferencia-embedding-service-0.0.1-SNAPSHOT.jar
 ```
 
+### Run the JAR in the background
+
+On an Ubuntu server without systemd, configure the database and v2 environment
+variables as described above, then run the following from the project directory:
+
+```bash
+mvn clean package
+nohup java -jar target/lareferencia-embedding-service-0.0.1-SNAPSHOT.jar \
+  > application.log 2>&1 < /dev/null &
+echo $! > application.pid
+```
+
+`mvn clean` removes `target`, including any `lareferencia-embedding-service-current.jar`
+link, so this example uses the versioned JAR. Confirm startup and follow the logs:
+
+```bash
+tail -f application.log
+```
+
+Check the saved process and stop it when needed:
+
+```bash
+ps -p "$(cat application.pid)" -o pid,args
+kill "$(cat application.pid)"
+```
+
+The PID file is not a service manager. Verify that it still identifies the intended
+Java process before stopping it. This process does not automatically restart after
+a server reboot.
+
 ## API
 
 Swagger UI is available when the service is running:

@@ -1,4 +1,10 @@
 #!/bin/bash
+set -e
+
+if [ ! -d /run/systemd/system ]; then
+    echo "Error: systemd is not running as the init system. Start the JAR directly or use an environment with systemd." >&2
+    exit 1
+fi
 
 # 1. Extract metadata from pom.xml (same logic as install script)
 APP_NAME=$(sed -n '/<parent>/,/<\/parent>/d; s/.*<artifactId>\(.*\)<\/artifactId>.*/\1/p' pom.xml | head -n 1)
