@@ -15,7 +15,7 @@ class MissingIdempotencyHeaderTest {
   @Test
   void namesTheRequiredHeaderWithoutCallingTheService() throws Exception {
     var service = mock(CollectionService.class);
-    var mvc = MockMvcBuilders.standaloneSetup(new CollectionController(service))
+    var mvc = MockMvcBuilders.standaloneSetup(new CollectionController(service,mock(org.lareferencia.embedding.v2.indexation.IndexationService.class)))
         .setControllerAdvice(new V2ExceptionHandler())
         .build();
 

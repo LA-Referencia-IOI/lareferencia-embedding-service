@@ -70,7 +70,7 @@ public class ImportRecordWriter {
     catch(java.io.IOException | IllegalArgumentException e){throw V2Exception.badRequest("Invalid embedding profile");}
     ProfileResource profile=profiles.resolveForImport(requestProfile);
     UUID index=indexations.resolveForImport(collection,profile.id(),profile.dimensions(),record.get("indexation"));
-    var configs=jdbc.query("SELECT vector_table,metric,ann_strategy FROM dvp.indexations WHERE id=? AND collection_id=? AND state='ready'",(rs,n)->new InlineIndex(rs.getString(1),rs.getString(2),rs.getString(3)),index,collection);
+    var configs=jdbc.query("SELECT vector_table,metric,ann_strategy FROM dvp.indexations WHERE id=? AND state='ready' AND EXISTS (SELECT 1 FROM dvp.collection_indexations ci WHERE ci.indexation_id=dvp.indexations.id AND ci.collection_id=?)",(rs,n)->new InlineIndex(rs.getString(1),rs.getString(2),rs.getString(3)),index,collection);
     if(configs.size()!=1 || !("vec_"+index.toString().replace("-","")).equals(configs.getFirst().table()))throw new V2Exception(409,"indexation_unavailable","Index configuration is not ready");
     var config=configs.getFirst();
     ObjectNode document=mapper.createObjectNode();if(record.has("metadata"))document.set("metadata",record.get("metadata"));

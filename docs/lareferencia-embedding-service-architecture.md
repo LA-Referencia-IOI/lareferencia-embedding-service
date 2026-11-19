@@ -9,7 +9,7 @@ LA Referencia Embedding Service is a Java 21 / Spring Boot application backed by
 
 The APIs share a process and database infrastructure but retain separate controllers, service code, storage models and error contracts. V1 cache hashes are not automatically converted into v2 documents or vectors: the original source text and complete embedding provenance cannot be reconstructed reliably from those hashes. A collection is an organizational scope, not a security tenant; deploy the service behind an appropriate access-control boundary.
 
-This document describes the implementation present in the repository. API examples and operational procedures are in the [Platform Guide](PLATFORM-GUIDE.md); end-to-end examples are in [Workflows](WORKFLOWS.md). The [v2 specification](document-vector-platform-specification.en.md) describes the intended contract. Implementation progress and remaining checks are recorded in [the implementation plan](coding/IMPLEMENTATION_PLAN.md).
+This document describes the implementation present in the repository. API examples and operational procedures are in the [Platform Guide](PLATFORM-GUIDE.md); end-to-end examples are in [Workflows](WORKFLOWS.md). The [v2 specification](document-vector-platform-specification.en.md) and [implementation plan](coding/IMPLEMENTATION_PLAN.md) are historical design records and may describe earlier contracts.
 
 ## 2. System context
 
@@ -73,13 +73,14 @@ V1 exposes store creation/listing, embedding generation/cache access and status 
 erDiagram
     COLLECTION ||--o{ DOCUMENT : contains
     DOCUMENT ||--o{ SOURCE_TEXT : contains
-    COLLECTION ||--o{ INDEXATION : owns
+    COLLECTION ||--o{ COLLECTION_INDEXATION : associates
+    INDEXATION ||--o{ COLLECTION_INDEXATION : associates
     EMBEDDING_PROFILE ||--o{ INDEXATION : configures
     INDEXATION ||--o{ VECTOR_UNIT : prepares
-    SOURCE_TEXT o|--o{ VECTOR_UNIT : derives
     DOCUMENT ||--o{ VECTOR_UNIT : owns
     VECTOR_UNIT ||--o| VECTOR_ROW : represents
-    COLLECTION ||--o{ JOB : scopes
+    COLLECTION o|--o{ JOB : scopes
+    INDEXATION o|--o{ JOB : scopes
     JOB ||--o{ JOB_ITEM : tracks
     JOB ||--o| IMPORT_FILE : references
 ```
@@ -87,7 +88,7 @@ erDiagram
 - A **collection** groups documents. Each document has an internal UUID, a collection-scoped exact `external_id`, metadata and a revision.
 - A **source text** has kind, optional language, content, SHA-256 and revision. The public document representation uses `knd`, `lng`, and `cnt`; the service assigns an internal key for each kind/language occurrence. Multiple texts can belong to one document.
 - An immutable **embedding profile** specifies model, declared revision, dimensions, execution mode, provider reference and versioned preparation/prefixes. `http` profiles support inference; `import_only` profiles carry declared provenance but cannot call a provider.
-- An immutable **indexation** binds a collection and profile to selection, chunking, distance metric and ANN strategy. Each indexation has a UUID-derived `dvp.vec_*` table. `state` describes table provisioning; `ann_state` independently describes approximate-index readiness.
+- An immutable **indexation** binds a profile to selection, chunking, distance metric and ANN strategy. It can exist without a collection; collections and indexations are connected many-to-many through `dvp.collection_indexations`, and `dvp.indexations` has no `collection_id`. Each indexation has a UUID-derived `dvp.vec_*` table. `state` describes table provisioning; `ann_state` independently describes approximate-index readiness.
 - A **vector unit** belongs to a document and indexation. Generated units store a prepared-text snapshot and hash; imported embeddings have an independent key. Neither representation references an individual source text.
 - **Jobs**, job items, idempotency records and import-file metadata are persisted in `dvp`. Long-running work is not held only in process memory.
 
@@ -104,16 +105,15 @@ flowchart TD
     U --> IJ[Import job applies records]
     IJ --> D
     P[Configure provider and create profile] --> I[Create indexation]
-    C --> I
+    C --> A[Attach collection and indexation]
+    I --> A
     I --> M[Maintenance job provisions vector table]
     M --> RD[Indexation ready]
-    RD --> PR[Optional preparation job]
-    D --> PR
     D --> G[Generation job]
     RD --> G
+    A --> G
     G --> PN[Prepare missing units]
     PN --> PV[Generate or reuse vectors within indexation]
-    PR --> G
     PV --> VR[Retrieve document vectors]
     PV --> EX[Exact search]
     RD --> ANN[Build or reconcile ANN when needed]
@@ -133,7 +133,7 @@ Import files require durable storage shared by API and worker instances with ato
 
 ### Preparation and generation
 
-A preparation job applies the indexation's kind/language selection, chunks selected texts, applies the profile's document preparation and records units. Empty selection lists match all values; `none` produces a whole-text unit and `characters-v1` uses code-point windows and overlap. Preparation does not call a provider. Character limits are not model token limits.
+The generation job internally applies the indexation's kind/language selection, chunks selected texts, applies the profile's document preparation and records units. There is no separate preparation-job endpoint. Empty selection lists match all values; `none` produces a whole-text unit and `characters-v1` uses code-point windows and overlap. Preparation does not call a provider. Character limits are not model token limits.
 
 A generation job prepares missing units and generates vectors that are not current. It uses a per-indexation/document advisory lock, deduplicates prepared input within a batch and may reuse an equal prepared input's vector **within the same indexation**. The worker does not hold a write transaction open across provider HTTP. Before publishing, it rechecks the document/source revisions, unit identity and hash, lease/fencing token and advisory-lock session; changed or deleted sources are skipped rather than publishing stale results. Provider calls can repeat after timeouts or failures, so database fencing is not an exactly-once external inference guarantee.
 
@@ -143,14 +143,13 @@ The provider registry supports `OLLAMA` and `OPENAI_COMPATIBLE` runtime connecti
 
 Workers claim eligible jobs with PostgreSQL row locking, leases, heartbeats and fencing tokens. Job enumeration is bounded: a collection-wide operation captures an upper document sequence and materializes items in batches rather than loading an entire collection into memory. Documents created later require another job. Job progress, results and checkpoints are persisted, allowing lease recovery without blindly repeating committed work.
 
-Transient provider failures, 429 and server errors can be retried with persisted bounded exponential backoff and jitter; `Retry-After` is capped. Permanent errors remain visible on job items. A retry endpoint creates a child job for eligible failed items. APIs expose public status, counters and sanitized diagnostics rather than internal lease ownership or raw provider responses. A completed job with no generated vectors can be valid—for example, when no selected text required work—so clients should inspect counters and per-document coverage.
+Transient provider failures, 429 and server errors can be retried with persisted bounded exponential backoff and jitter; `Retry-After` is capped. Permanent errors remain visible on job items. A retry endpoint creates a child job for eligible failed items. APIs expose public status, counters and sanitized diagnostics rather than internal lease ownership or raw provider responses. A completed job with no generated vectors can be valid—for example, when no selected text required work—so clients should inspect job counters and retrieve the stored vectors.
 
 ## 6. Retrieval, search and ANN
 
-The v2 retrieval API supports a document by UUID or exact external ID, within one indexation or across all ready indexations in its collection. It returns stored vectors, descriptors and coverage. Text/metadata projections are optional. All-indexation results are a flat, keyset-paginated list; unavailable indexations are reported separately. There is no single endpoint that retrieves every document's vectors for an entire collection; clients list documents and page through each document's vectors.
+The retrieval API resolves a document by UUID or exact external ID within one indexation. Direct routes are `/api/v2/indexations/{i}/documents/{d}/vectors` and `/api/v2/indexations/{i}/vectors?external_id=...`. They return an OpenAI-style list of embeddings; all vectors are returned unless `limit` is supplied. `collection_id` is optional, but an external ID found in more than one attached collection returns 409 until the collection is specified. No token usage is reported because stored vectors do not retain that information. Collection-scoped retrieval routes remain available.
 
-Search is scoped to one indexation and accepts exactly one query text or vector. Text is prepared with the profile's query recipe and sent to its HTTP provider. For an external vector, the service validates its dimension and numeric properties, while the client is responsible for matching its embedding space. Search does not return embeddings and does not perform cross-indexation federation.
-
+Search uses `POST /api/v2/indexations/{i}/search` for all collections attached to an indexation, optionally restricted with `collection_id`; results include the collection ID. It accepts exactly one query text or vector. Text is prepared with the selected compatible HTTP profile's query recipe and sent to its provider. For an external vector, the service validates its dimension and numeric properties, while the client is responsible for matching its embedding space. Search does not return embeddings and does not perform cross-indexation federation.
 - **Exact search** evaluates current vectors from the indexation table. For document results it selects each document's globally closest unit before applying the limit. Distance ties are ordered deterministically. A shortfall is reported as `exhausted`.
 - **Approximate search** requires a valid, ready HNSW index; unavailable ANN returns 409 without silently falling back to exact. Candidate retrieval starts with a bounded budget, expands up to 10,000, filters current sources and reranks full float32 distances. The best unit is the best among candidates, not a guaranteed global best. The response declares `recall_guaranteed=false` and reports `candidate_limit` for a shortfall.
 - Supported distances are cosine, L2 and negative inner product. Native HNSW vector indexes support up to 2000 dimensions; explicit halfvec HNSW supports up to 4000; `none` supports exact access up to 16000. Halfvec admission rejects overflow and rejects vectors that round to all zero for cosine. These checks apply to relevant imported/generated vectors and approximate query vectors.
@@ -184,7 +183,7 @@ The v2 readiness indicator checks pgvector compatibility and reports configurati
 
 Backups must preserve a consistent pair of the PostgreSQL data—including Flyway history, v1 tables, `dvp` registry, dynamic tables, jobs and checkpoints—and durable import files. Quiesce writes/uploads and workers or use a separately validated coordinated snapshot/PITR procedure. Restore to an isolated environment and verify extension, schema, dynamic tables, jobs and file checksums before resuming workers. Do not treat independently timed database and file snapshots as automatically consistent.
 
-The Flyway V1 and V2 migrations own the static schema, and Hibernate validates the v1 entity schema. A verified v1 database without Flyway history must be baselined at version 0 so that both migrations can run. For installation, compatibility, and rollback procedures, see [the platform guide](PLATFORM-GUIDE.md#install-v2-or-upgrade-from-v1). A model, revision, preparation, dimension or metric change requires a new immutable profile/indexation and explicit generation or import, with an ANN build where applicable.
+The Flyway V1 and V2 migrations own the static schema, and Hibernate validates the v1 entity schema. A verified v1 database without Flyway history must be baselined at version 0 so that both migrations can run. The current v2 migration initializes the N:N schema; an earlier v2 database requires a separately designed migration or recreation and reimport. For installation, compatibility, and rollback procedures, see [the platform guide](PLATFORM-GUIDE.md#install-v2-or-upgrade-from-v1). A model, revision, preparation, dimension or metric change requires a new immutable profile/indexation and explicit generation or import, with an ANN build where applicable.
 
 ## 9. Verification and capacity limits
 

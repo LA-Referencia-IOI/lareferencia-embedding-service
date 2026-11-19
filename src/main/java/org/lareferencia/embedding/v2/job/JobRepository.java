@@ -81,10 +81,13 @@ public class JobRepository {
   public Job insert(UUID id,UUID collectionId,UUID indexationId,UUID parent,String kind,JsonNode parameters) {
     if (!Set.of("import","prepare","generate","maintenance").contains(kind) || !parameters.isObject())
       throw V2Exception.badRequest("Invalid job kind or parameters");
-    if (!Boolean.TRUE.equals(write.queryForObject("SELECT EXISTS(SELECT 1 FROM dvp.collections WHERE id=?)",Boolean.class,collectionId)))
+    if(collectionId==null && (!"maintenance".equals(kind) || indexationId==null))throw V2Exception.badRequest("A collection is required for this job");
+    if (collectionId!=null && !Boolean.TRUE.equals(write.queryForObject("SELECT EXISTS(SELECT 1 FROM dvp.collections WHERE id=?)",Boolean.class,collectionId)))
       throw new V2Exception(404,"collection_not_found","Collection does not exist");
-    if(indexationId!=null && !Boolean.TRUE.equals(write.queryForObject(
-        "SELECT EXISTS(SELECT 1 FROM dvp.indexations WHERE id=? AND collection_id=?)",Boolean.class,indexationId,collectionId)))
+    if(indexationId!=null && collectionId==null && !Boolean.TRUE.equals(write.queryForObject("SELECT EXISTS(SELECT 1 FROM dvp.indexations WHERE id=?)",Boolean.class,indexationId)))
+      throw new V2Exception(404,"indexation_not_found","Index configuration does not exist");
+    if(indexationId!=null && collectionId!=null && !Boolean.TRUE.equals(write.queryForObject(
+        "SELECT EXISTS(SELECT 1 FROM dvp.collection_indexations WHERE indexation_id=? AND collection_id=?)",Boolean.class,indexationId,collectionId)))
       throw new V2Exception(404,"indexation_not_found","Index configuration does not exist in collection");
     write.update("INSERT INTO dvp.jobs(id,collection_id,indexation_id,parent_job_id,kind,status,parameters) VALUES (?,?,?,?,?,'queued',?::jsonb)",
         id,collectionId,indexationId,parent,kind,json(parameters));

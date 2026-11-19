@@ -23,7 +23,7 @@ class SearchCapacityBenchmarkTest {
     final int count=256,dim=1024,iterations=30;UUID c=UUID.randomUUID(),p=UUID.randomUUID(),i=UUID.randomUUID();String table="vec_"+i.toString().replace("-","");
     jdbc.update("INSERT INTO dvp.collections(id,slug,name) VALUES (?,?,?)",c,"benchmark-"+c,"synthetic");
     jdbc.update("INSERT INTO dvp.embedding_profiles(id,slug,model,model_revision,dimensions,execution_mode,preparation,fingerprint) VALUES (?,?,'synthetic','v1',?,'import_only','{\"version\":\"identity-v1\",\"document_prefix\":\"\",\"query_prefix\":\"\"}',?)",p,"bench-"+p,dim,p.toString().replace("-","").repeat(2));
-    jdbc.update("INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state) VALUES (?,?,?,?,'{}','{\"mode\":\"none\"}','cosine','hnsw_vector',?,'ready','ready')",i,c,"benchmark",p,table);
+    jdbc.update("INSERT INTO dvp.indexations(id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state) VALUES (?,?,?,'{}','{\"mode\":\"none\"}','cosine','hnsw_vector',?,'ready','ready')",i,"benchmark",p,table);jdbc.update("INSERT INTO dvp.collection_indexations(indexation_id,collection_id) VALUES (?,?)",i,c);
     jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY,document_id uuid NOT NULL,source_text_id uuid NOT NULL,source_revision bigint NOT NULL,indexation_id uuid NOT NULL,embedding vector(1024) NOT NULL,origin varchar(10) NOT NULL)");
     long load=System.nanoTime();for(int n=0;n<count;n++){
       UUID d=UUID.randomUUID(),t=UUID.randomUUID(),u=UUID.randomUUID();String v="[1,"+(n/(double)count)+",0"+",0".repeat(dim-3)+"]";

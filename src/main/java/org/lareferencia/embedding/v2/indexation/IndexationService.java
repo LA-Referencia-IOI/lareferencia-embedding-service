@@ -26,22 +26,33 @@ public class IndexationService {
     this.canonical=canonical;this.cursors=cursors;this.jobs=jobs;
   }
   public IdempotencyService.Result create(String collection,JsonNode raw,String key,MultiValueMap<String,String> query) {
-    requireQuery(query,Set.of());UUID c=uuid(collection);object(raw,Set.of("slug","profile_id","selection","chunking","metric","ann_strategy"));
+    requireQuery(query,Set.of());UUID c=collection==null?null:uuid(collection);object(raw,Set.of("slug","profile_id","selection","chunking","metric","ann_strategy"));
     var definition=definition(raw);
     UUID profile=uuid(text(raw,"profile_id",null));
-    String path=path(c);
+    String path=c==null?"/api/v2/indexations":path(c);
     return idempotency.execute("POST "+path,key,canonical.requestHash(query,raw),()->{
-      if(!exists(write,"SELECT EXISTS(SELECT 1 FROM dvp.collections WHERE id=?)",c)) throw new V2Exception(404,"collection_not_found","Collection does not exist");
+      write.queryForObject("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))",Object.class,"dvp:indexation:"+definition.slug());
+      if(c!=null && !exists(write,"SELECT EXISTS(SELECT 1 FROM dvp.collections WHERE id=?)",c)) throw new V2Exception(404,"collection_not_found","Collection does not exist");
       var dims=write.query("SELECT dimensions FROM dvp.embedding_profiles WHERE id=?",(rs,n)->rs.getInt(1),profile);
       if(dims.isEmpty()) throw new V2Exception(404,"profile_not_found","Profile does not exist");
       validateDimensions(definition.strategy(),dims.getFirst());
+      if(Boolean.TRUE.equals(write.queryForObject("SELECT EXISTS(SELECT 1 FROM dvp.indexations WHERE slug=?)",Boolean.class,definition.slug())))
+        throw new V2Exception(409,"indexation_exists","Index configuration slug already exists");
       UUID id=UUID.randomUUID();
-      int inserted=insert(c,profile,id,definition);
+      int inserted=insert(profile,id,definition);
       if(inserted==0) throw new V2Exception(409,"indexation_exists","Index configuration slug already exists");
+      if(c!=null)write.update("INSERT INTO dvp.collection_indexations(indexation_id,collection_id) VALUES (?,?)",id,c);
       var job=jobs.insert(UUID.randomUUID(),c,id,null,"maintenance",mapper.createObjectNode().put("operation","provision"));
       ObjectNode response=(ObjectNode)fetch(write,c,id);response.put("job_id",job.id().toString());
       return new IdempotencyService.Result(202,response,Map.of("Location",path+"/"+id),job.id());
     });
+  }
+  @org.springframework.transaction.annotation.Transactional
+  public void attach(String collection,String indexation,MultiValueMap<String,String> query) {
+    requireQuery(query,Set.of());UUID c=uuid(collection),i=uuid(indexation);
+    if(!exists(write,"SELECT EXISTS(SELECT 1 FROM dvp.collections WHERE id=?)",c))throw new V2Exception(404,"collection_not_found","Collection does not exist");
+    if(!exists(write,"SELECT EXISTS(SELECT 1 FROM dvp.indexations WHERE id=?)",i))throw new V2Exception(404,"indexation_not_found","Index configuration does not exist");
+    write.update("INSERT INTO dvp.collection_indexations(indexation_id,collection_id) VALUES (?,?) ON CONFLICT DO NOTHING",i,c);
   }
   /** Resolve or atomically create an inline import indexation in the caller's write transaction. */
   public UUID resolveForImport(UUID collection,UUID profile,int dimensions,JsonNode raw) {
@@ -52,21 +63,24 @@ public class IndexationService {
     var definition=definition(raw);
     validateDimensions(definition.strategy(),dimensions);
     if(!exists(write,"SELECT EXISTS(SELECT 1 FROM dvp.collections WHERE id=?)",collection))throw new V2Exception(404,"collection_not_found","Collection does not exist");
-    UUID id=UUID.randomUUID();
-    int inserted=insert(collection,profile,id,definition);
-    if(inserted==1) {
+    write.queryForObject("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))",Object.class,"dvp:indexation:"+definition.slug());
+    var existing=write.query("SELECT id,profile_id,selection::text,chunking::text,metric,ann_strategy,state FROM dvp.indexations WHERE slug=? ORDER BY id",(rs,n)->{
+      try {return new ImportIndex(rs.getObject(1,UUID.class),rs.getObject(2,UUID.class),mapper.readTree(rs.getString(3)),mapper.readTree(rs.getString(4)),rs.getString(5),rs.getString(6),rs.getString(7));}
+      catch(java.io.IOException e){throw new IllegalStateException("Invalid stored index configuration");}
+    },definition.slug());
+    if(existing.isEmpty()) {
+      UUID id=UUID.randomUUID();
+      if(insert(profile,id,definition)!=1)throw new V2Exception(409,"indexation_conflict","Index configuration changed concurrently");
+      write.update("INSERT INTO dvp.collection_indexations(indexation_id,collection_id) VALUES (?,?)",id,collection);
       IndexTableProvisioner.create(write,id,table(id),dimensions);
       write.update("UPDATE dvp.indexations SET state='ready' WHERE id=?",id);
       return id;
     }
-    var existing=write.query("SELECT id,profile_id,selection::text,chunking::text,metric,ann_strategy,state FROM dvp.indexations WHERE collection_id=? AND slug=?",(rs,n)->{
-      try {return new ImportIndex(rs.getObject(1,UUID.class),rs.getObject(2,UUID.class),mapper.readTree(rs.getString(3)),mapper.readTree(rs.getString(4)),rs.getString(5),rs.getString(6),rs.getString(7));}
-      catch(java.io.IOException e){throw new IllegalStateException("Invalid stored index configuration");}
-    },collection,definition.slug());
-    if(existing.isEmpty())throw new V2Exception(409,"indexation_conflict","Index configuration changed concurrently");
+    if(existing.size()>1)throw new V2Exception(409,"indexation_conflict","Multiple existing indexations share this slug; resolve the ambiguity before importing");
     var match=existing.getFirst();if(!profile.equals(match.profile()) || !definition.selection().equals(match.selection()) || !definition.chunking().equals(match.chunking()) || !definition.metric().equals(match.metric()) || !definition.strategy().equals(match.strategy()))
       throw new V2Exception(409,"indexation_conflict","Index configuration conflicts with an existing resource");
     if(!"ready".equals(match.state()))throw new V2Exception(409,"indexation_unavailable","Index configuration is not ready");
+    write.update("INSERT INTO dvp.collection_indexations(indexation_id,collection_id) VALUES (?,?) ON CONFLICT DO NOTHING",match.id(),collection);
     return match.id();
   }
   private record Definition(String slug,ObjectNode selection,ObjectNode chunking,String metric,String strategy) { }
@@ -82,11 +96,11 @@ public class IndexationService {
     if((strategy.equals("hnsw_vector") && dimensions>2000) || (strategy.equals("hnsw_halfvec") && dimensions>4000))
       throw new V2Exception(422,"ann_dimensions_unsupported","Use an explicitly supported strategy for this dimension");
   }
-  private int insert(UUID collection,UUID profile,UUID id,Definition definition) {
+  private int insert(UUID profile,UUID id,Definition definition) {
     return write.update("""
-        INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state)
-        VALUES (?,?,?,?,?::jsonb,?::jsonb,?,?,?,'provisioning',?) ON CONFLICT (collection_id,slug) DO NOTHING
-        """,id,collection,definition.slug(),profile,definition.selection().toString(),definition.chunking().toString(),
+        INSERT INTO dvp.indexations(id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state)
+        VALUES (?,?,?,?::jsonb,?::jsonb,?,?,?,'provisioning',?) ON CONFLICT (slug) DO NOTHING
+        """,id,definition.slug(),profile,definition.selection().toString(),definition.chunking().toString(),
         definition.metric(),definition.strategy(),table(id),definition.strategy().equals("none")?"disabled":"pending");
   }
   private record ImportIndex(UUID id,UUID profile,JsonNode selection,JsonNode chunking,String metric,String strategy,String state) { }
@@ -104,13 +118,50 @@ public class IndexationService {
     });
   }
   public JsonNode get(String collection,String id,MultiValueMap<String,String> query) { requireQuery(query,Set.of());UUID c=uuid(collection),i=uuid(id);return reads.execute(tx->fetch(read,c,i)); }
+  public JsonNode getGlobal(String id,MultiValueMap<String,String> query) {requireQuery(query,Set.of());UUID i=uuid(id);return reads.execute(tx->fetch(read,null,i));}
+  public PageResponse<org.lareferencia.embedding.v2.collection.CollectionResource> collections(String id,MultiValueMap<String,String> query) {
+    requireQuery(query,Set.of("limit","cursor"));UUID i=uuid(id);int limit=100;
+    try {if(query.containsKey("limit"))limit=Integer.parseInt(query.getFirst("limit"));}catch(NumberFormatException e){throw V2Exception.badRequest("Invalid limit");}
+    if(limit<1||limit>1000)throw V2Exception.badRequest("Invalid limit");
+    String scope="/api/v2/indexations/"+i+"/collections";var pos=cursors.decode(query.getFirst("cursor"),scope,"");
+    if(pos.size()>1)throw V2Exception.badRequest("Invalid cursor");UUID after=pos.isEmpty()?null:uuid(pos.getFirst());int size=limit;
+    return reads.execute(tx->{
+      if(!exists(read,"SELECT EXISTS(SELECT 1 FROM dvp.indexations WHERE id=?)",i))throw new V2Exception(404,"indexation_not_found","Indexation does not exist");
+      var rows=read.query("SELECT c.id,c.slug,c.name,c.created_at FROM dvp.collection_indexations ci JOIN dvp.collections c ON c.id=ci.collection_id WHERE ci.indexation_id=? AND (?::uuid IS NULL OR c.id>?) ORDER BY c.id LIMIT ?",(rs,n)->new org.lareferencia.embedding.v2.collection.CollectionResource(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3),rs.getTimestamp(4).toInstant()),i,after,after,size+1);
+      boolean more=rows.size()>size;var page=List.copyOf(rows.subList(0,Math.min(size,rows.size())));
+      return new PageResponse<>(page,more?cursors.encode(scope,"",List.of(page.getLast().id().toString())):null);
+    });
+  }
+  public PageResponse<JsonNode> listGlobal(MultiValueMap<String,String> query) {
+    requireQuery(query,Set.of("limit","cursor","collection_id"));
+    UUID collection=query.containsKey("collection_id")?uuid(query.getFirst("collection_id")):null;
+    int limit=100;
+    try {if(query.containsKey("limit"))limit=Integer.parseInt(query.getFirst("limit"));}catch(NumberFormatException e){throw V2Exception.badRequest("Invalid limit");}
+    if(limit<1 || limit>1000)throw V2Exception.badRequest("Invalid limit");
+    String scope="/api/v2/indexations", filter=collection==null?"":collection.toString();
+    var pos=cursors.decode(query.getFirst("cursor"),scope,filter);
+    if(pos.size()>1)throw V2Exception.badRequest("Invalid cursor");
+    UUID after=pos.isEmpty()?null:uuid(pos.getFirst());int size=limit;
+    return reads.execute(tx->{
+      if(collection!=null && !exists(read,"SELECT EXISTS(SELECT 1 FROM dvp.collections WHERE id=?)",collection))throw new V2Exception(404,"collection_not_found","Collection does not exist");
+      var ids=read.query("SELECT i.id FROM dvp.indexations i WHERE (?::uuid IS NULL OR i.id>?) AND (?::uuid IS NULL OR EXISTS (SELECT 1 FROM dvp.collection_indexations ci WHERE ci.indexation_id=i.id AND ci.collection_id=?)) ORDER BY i.id LIMIT ?",
+          (rs,n)->rs.getObject(1,UUID.class),after,after,collection,collection,size+1);
+      boolean more=ids.size()>size;
+      var page=ids.subList(0,Math.min(size,ids.size())).stream().map(i->{
+        ObjectNode item=(ObjectNode)fetch(read,null,i);
+        var collections=read.query("SELECT collection_id FROM dvp.collection_indexations WHERE indexation_id=? ORDER BY collection_id",(rs,n)->rs.getObject(1,UUID.class),i);
+        var array=item.putArray("collection_ids");collections.forEach(id->array.add(id.toString()));return (JsonNode)item;
+      }).toList();
+      return new PageResponse<>(page,more?cursors.encode(scope,filter,List.of(ids.get(size-1).toString())):null);
+    });
+  }
   public PageResponse<JsonNode> list(String collection,MultiValueMap<String,String> query) {
     requireQuery(query,Set.of("limit","cursor"));UUID c=uuid(collection);int limit=100;
     try { if(query.containsKey("limit")) limit=Integer.parseInt(query.getFirst("limit")); } catch(NumberFormatException e) { throw V2Exception.badRequest("Invalid limit"); }
     if(limit<1 || limit>1000) throw V2Exception.badRequest("Invalid limit");String path=path(c);
     var pos=cursors.decode(query.getFirst("cursor"),path,"");if(pos.size()>1) throw V2Exception.badRequest("Invalid cursor");UUID after=pos.isEmpty()?null:uuid(pos.getFirst());int size=limit;
     return reads.execute(tx->{if(!exists(read,"SELECT EXISTS(SELECT 1 FROM dvp.collections WHERE id=?)",c)) throw new V2Exception(404,"collection_not_found","Collection does not exist");
-      var ids=read.query("SELECT id FROM dvp.indexations WHERE collection_id=? AND (?::uuid IS NULL OR id>?) ORDER BY id LIMIT ?",(rs,n)->rs.getObject(1,UUID.class),c,after,after,size+1);
+      var ids=read.query("SELECT indexation_id FROM dvp.collection_indexations WHERE collection_id=? AND (?::uuid IS NULL OR indexation_id>?) ORDER BY indexation_id LIMIT ?",(rs,n)->rs.getObject(1,UUID.class),c,after,after,size+1);
       boolean more=ids.size()>size;var page=ids.subList(0,Math.min(size,ids.size())).stream().map(i->fetch(read,c,i)).toList();
       return new PageResponse<>(page,more?cursors.encode(path,"",List.of(ids.get(size-1).toString())):null);});
   }
@@ -122,9 +173,9 @@ public class IndexationService {
       (SELECT GREATEST(s.last_analyze,s.last_autoanalyze) FROM pg_stat_user_tables s
         WHERE s.schemaname='dvp' AND s.relname=i.vector_table) AS measured_at
       FROM dvp.indexations i
-      JOIN dvp.embedding_profiles p ON p.id=i.profile_id WHERE i.collection_id=? AND i.id=?
-      """,(rs,n)->{try {ObjectNode x=mapper.createObjectNode().put("id",rs.getObject("id").toString()).put("collection_id",c.toString())
-          .put("slug",rs.getString("slug")).put("profile_id",rs.getObject("profile_id").toString()).put("metric",rs.getString("metric"))
+      JOIN dvp.embedding_profiles p ON p.id=i.profile_id WHERE (?::uuid IS NULL OR EXISTS (SELECT 1 FROM dvp.collection_indexations ci WHERE ci.indexation_id=i.id AND ci.collection_id=?)) AND i.id=?
+      """,(rs,n)->{try {ObjectNode x=mapper.createObjectNode().put("id",rs.getObject("id").toString());if(c!=null)x.put("collection_id",c.toString());
+          x.put("slug",rs.getString("slug")).put("profile_id",rs.getObject("profile_id").toString()).put("metric",rs.getString("metric"))
           .put("ann_strategy",rs.getString("ann_strategy")).put("state",rs.getString("state")).put("ann_state",rs.getString("ann_state"))
           .put("created_at",rs.getTimestamp("created_at").toInstant().toString());
         x.set("selection",mapper.readTree(rs.getString("selection")));x.set("chunking",mapper.readTree(rs.getString("chunking")));
@@ -133,7 +184,7 @@ public class IndexationService {
         ObjectNode counters=x.putObject("counters").put("is_estimate",true);long estimate=rs.getLong("vectors_estimated");
         if(rs.wasNull())counters.putNull("vectors_estimated");else counters.put("vectors_estimated",estimate);
         var measured=rs.getTimestamp("measured_at");if(measured==null)counters.putNull("measured_at");else counters.put("measured_at",measured.toInstant().toString());
-        return (JsonNode)x;}catch(java.io.IOException e){throw new IllegalStateException("Invalid index configuration");}},c,i).stream().findFirst()
+        return (JsonNode)x;}catch(java.io.IOException e){throw new IllegalStateException("Invalid index configuration");}},c,c,i).stream().findFirst()
       .orElseThrow(()->new V2Exception(404,"indexation_not_found","Index configuration does not exist in collection"));
   }
   static String table(UUID id) { return "vec_"+id.toString().replace("-",""); }

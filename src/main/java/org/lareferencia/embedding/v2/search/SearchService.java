@@ -22,14 +22,14 @@ public class SearchService {
   private final ImportVectorValidator validator;private final ObjectMapper mapper;private final Semaphore exactSlots,approxSlots;
   private final io.micrometer.core.instrument.MeterRegistry metrics;
   record Config(UUID id,UUID profile,String table,String metric,String strategy,String state,String annState) {}
-  record Hit(UUID document,UUID unit,String external,double distance,String text,String metadata,String embeddingKey) {}
+  record Hit(UUID document,UUID unit,String external,double distance,String text,String metadata,String embeddingKey,UUID collection) {}
   public SearchService(@Qualifier("readJdbc") JdbcTemplate jdbc,@Qualifier("readTransactions") TransactionTemplate reads,DvpProperties props,
       ProfileRepository profiles,ProfilePreparation preparation,ProviderRegistry providers,ImportVectorValidator validator,ObjectMapper mapper,io.micrometer.core.instrument.MeterRegistry metrics) {
     this.jdbc=jdbc;this.reads=reads;this.props=props;this.profiles=profiles;this.preparation=preparation;this.providers=providers;this.validator=validator;this.mapper=mapper;this.metrics=metrics;
     exactSlots=new Semaphore(props.getExactConcurrency());approxSlots=new Semaphore(props.getApproximateConcurrency());
   }
   public Map<String,Object> search(String collection,String indexation,JsonNode request) {
-    UUID c=uuid(collection),i=uuid(indexation);fields(request,Set.of("query","top_n","result_unit","mode","include"));
+    UUID c=collection==null?null:uuid(collection),i=uuid(indexation);fields(request,Set.of("query","top_n","result_unit","mode","include"));
     JsonNode query=request.get("query");fields(query,Set.of("text","vector","profile_id"));
     boolean hasText=query.has("text"),hasVector=query.has("vector");if(hasText==hasVector)throw V2Exception.badRequest("Provide exactly one query text or vector");
     UUID queryProfileId=null;
@@ -65,7 +65,7 @@ public class SearchService {
     } catch(RuntimeException e) {outcome="error";throw e;} finally {sample.stop(metrics.timer("dvp.search.duration","mode",mode,"outcome",outcome));slots.release();}
   }
   private Config config(UUID collection,UUID id) {
-    var found=jdbc.query("SELECT id,profile_id,vector_table,metric,ann_strategy,state,ann_state FROM dvp.indexations WHERE collection_id=? AND id=?",(rs,n)->new Config(rs.getObject(1,UUID.class),rs.getObject(2,UUID.class),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7)),collection,id);
+    var found=jdbc.query("SELECT id,profile_id,vector_table,metric,ann_strategy,state,ann_state FROM dvp.indexations WHERE (?::uuid IS NULL OR EXISTS (SELECT 1 FROM dvp.collection_indexations ci WHERE ci.indexation_id=dvp.indexations.id AND ci.collection_id=?)) AND id=?",(rs,n)->new Config(rs.getObject(1,UUID.class),rs.getObject(2,UUID.class),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7)),collection,collection,id);
     if(found.isEmpty())throw new V2Exception(404,"not_found","Resource not found");Config result=found.getFirst();if(!result.table().equals("vec_"+id.toString().replace("-","")))throw new IllegalStateException("Invalid vector table identity");return result;
   }
   private void check(Config c,String mode) {
@@ -76,8 +76,8 @@ public class SearchService {
     String op=switch(c.metric()){case "cosine"->"<=>";case "l2"->"<->";case "inner_product"->"<#>";default->throw new IllegalStateException("Invalid metric");};
     List<Hit> hits;
     if(mode.equals("exact")) {
-      timeout(deadline);String sql="WITH distances AS MATERIALIZED (SELECT v.unit_id,v.document_id,u.embedding_key,(v.embedding "+op+" ?::vector) distance FROM dvp."+c.table()+" v JOIN dvp.vector_units u ON u.id=v.unit_id AND u.document_id=v.document_id AND u.indexation_id=v.indexation_id JOIN dvp.documents d ON d.id=u.document_id AND d.collection_id=u.collection_id WHERE u.indexation_id=? AND u.collection_id=?), ranked AS (SELECT *,row_number() OVER (PARTITION BY document_id ORDER BY distance,unit_id) rn FROM distances) SELECT r.document_id,r.unit_id,d.external_id,r.distance,"+(includes.contains("texts")?"u.prepared_text":"NULL::text")+","+(includes.contains("metadata")?"d.metadata::text":"NULL::text")+",r.embedding_key FROM ranked r JOIN dvp.vector_units u ON u.id=r.unit_id JOIN dvp.documents d ON d.id=r.document_id "+(unit.equals("document")?"WHERE rn=1 ":"")+"ORDER BY r.distance,r.document_id,r.unit_id LIMIT ?";
-      hits=jdbc.query(sql,(rs,n)->hit(rs),vector,c.id(),collection,top);
+      timeout(deadline);String sql="WITH distances AS MATERIALIZED (SELECT v.unit_id,v.document_id,u.embedding_key,(v.embedding "+op+" ?::vector) distance FROM dvp."+c.table()+" v JOIN dvp.vector_units u ON u.id=v.unit_id AND u.document_id=v.document_id AND u.indexation_id=v.indexation_id JOIN dvp.documents d ON d.id=u.document_id AND d.collection_id=u.collection_id WHERE u.indexation_id=? AND (?::uuid IS NULL OR u.collection_id=?)), ranked AS (SELECT *,row_number() OVER (PARTITION BY document_id ORDER BY distance,unit_id) rn FROM distances) SELECT r.document_id,r.unit_id,d.external_id,r.distance,"+(includes.contains("texts")?"u.prepared_text":"NULL::text")+","+(includes.contains("metadata")?"d.metadata::text":"NULL::text")+",r.embedding_key,u.collection_id FROM ranked r JOIN dvp.vector_units u ON u.id=r.unit_id JOIN dvp.documents d ON d.id=r.document_id "+(unit.equals("document")?"WHERE rn=1 ":"")+"ORDER BY r.distance,r.document_id,r.unit_id LIMIT ?";
+      hits=jdbc.query(sql,(rs,n)->hit(rs),vector,c.id(),collection,collection,top);
     } else {
       String indexOp=(c.strategy().equals("hnsw_halfvec")?"halfvec_":"vector_")+switch(c.metric()){case "cosine"->"cosine_ops";case "l2"->"l2_ops";case "inner_product"->"ip_ops";default->throw new IllegalStateException("Invalid metric");};
       String indexExpression=c.strategy().equals("hnsw_halfvec")?"(embedding::halfvec("+dimensions(vector)+"))":"embedding";
@@ -88,12 +88,12 @@ public class SearchService {
       while(true) {
         timeout(deadline);jdbc.execute("SET LOCAL hnsw.ef_search = "+Math.min(1000,budget));jdbc.execute("SET LOCAL hnsw.iterative_scan = 'strict_order'");jdbc.execute("SET LOCAL hnsw.max_scan_tuples = 10000");
         String candidate=c.strategy().equals("hnsw_halfvec")?"(v.embedding::halfvec("+dimensions(vector)+")) "+op+" (?::vector)::halfvec("+dimensions(vector)+")":"v.embedding "+op+" ?::vector";
-        String sql="WITH candidates AS MATERIALIZED (SELECT v.unit_id,v.document_id,v.indexation_id,v.embedding FROM dvp."+c.table()+" v ORDER BY "+candidate+" LIMIT ?) SELECT v.document_id,v.unit_id,d.external_id,(v.embedding "+op+" ?::vector) distance,NULL::text,NULL::text,u.embedding_key FROM candidates v JOIN dvp.vector_units u ON u.id=v.unit_id AND u.document_id=v.document_id AND u.indexation_id=v.indexation_id JOIN dvp.documents d ON d.id=u.document_id AND d.collection_id=u.collection_id WHERE u.indexation_id=? AND u.collection_id=?";
-        for(Hit h:jdbc.query(sql,(rs,n)->hit(rs),vector,budget,vector,c.id(),collection))accumulated.put(h.unit(),h);
+        String sql="WITH candidates AS MATERIALIZED (SELECT v.unit_id,v.document_id,v.indexation_id,v.embedding FROM dvp."+c.table()+" v ORDER BY "+candidate+" LIMIT ?) SELECT v.document_id,v.unit_id,d.external_id,(v.embedding "+op+" ?::vector) distance,NULL::text,NULL::text,u.embedding_key,u.collection_id FROM candidates v JOIN dvp.vector_units u ON u.id=v.unit_id AND u.document_id=v.document_id AND u.indexation_id=v.indexation_id JOIN dvp.documents d ON d.id=u.document_id AND d.collection_id=u.collection_id WHERE u.indexation_id=? AND (?::uuid IS NULL OR u.collection_id=?)";
+        for(Hit h:jdbc.query(sql,(rs,n)->hit(rs),vector,budget,vector,c.id(),collection,collection))accumulated.put(h.unit(),h);
         hits=rank(accumulated.values(),unit,top);if(hits.size()>=top||budget>=10000){metrics.summary("dvp.search.candidates","mode","approximate").record(accumulated.size());break;}budget=Math.min(10000,budget*2);
       }
     }
-    List<Map<String,Object>> results=new ArrayList<>();for(Hit h:hits){Map<String,Object> row=new LinkedHashMap<>();row.put("document_id",h.document());row.put("external_id",h.external());row.put("unit_id",h.unit());if(h.embeddingKey()!=null)row.put("id",h.embeddingKey());row.put("distance",h.distance());String text=h.text(),metadata=h.metadata();
+    List<Map<String,Object>> results=new ArrayList<>();for(Hit h:hits){Map<String,Object> row=new LinkedHashMap<>();row.put("collection_id",h.collection());row.put("document_id",h.document());row.put("external_id",h.external());row.put("unit_id",h.unit());if(h.embeddingKey()!=null)row.put("id",h.embeddingKey());row.put("distance",h.distance());String text=h.text(),metadata=h.metadata();
       if(mode.equals("approximate") && !includes.isEmpty()) {
         timeout(deadline);
         var projection=jdbc.queryForObject("SELECT "+(includes.contains("texts")?"u.prepared_text":"NULL::text")+","+(includes.contains("metadata")?"d.metadata::text":"NULL::text")+" FROM dvp.vector_units u JOIN dvp.documents d ON d.id=u.document_id WHERE u.id=? AND u.document_id=?",(rs,n)->new String[]{rs.getString(1),rs.getString(2)},h.unit(),h.document());
@@ -104,7 +104,7 @@ public class SearchService {
     Map<String,Object> response=new LinkedHashMap<>();response.put("indexation_id",c.id());response.put("profile_id",c.profile());response.put("metric",c.metric());response.put("mode",mode);response.put("result_unit",unit);response.put("requested",top);response.put("returned",results.size());response.put("shortfall_reason",results.size()<top?(mode.equals("exact")?"exhausted":"candidate_limit"):null);response.put("recall_guaranteed",mode.equals("exact"));response.put("results",results);return response;
   }
   private static List<Hit> rank(Collection<Hit> hits,String unit,int limit) {var sorted=hits.stream().sorted(Comparator.comparingDouble(Hit::distance).thenComparing(h->h.document().toString()).thenComparing(h->h.unit().toString())).toList();if(unit.equals("unit"))return sorted.stream().limit(limit).toList();Set<UUID> seen=new HashSet<>();return sorted.stream().filter(h->seen.add(h.document())).limit(limit).toList();}
-  private static Hit hit(java.sql.ResultSet rs)throws java.sql.SQLException{return new Hit(rs.getObject(1,UUID.class),rs.getObject(2,UUID.class),rs.getString(3),rs.getDouble(4),rs.getString(5),rs.getString(6),rs.getString(7));}
+  private static Hit hit(java.sql.ResultSet rs)throws java.sql.SQLException{return new Hit(rs.getObject(1,UUID.class),rs.getObject(2,UUID.class),rs.getString(3),rs.getDouble(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getObject(8,UUID.class));}
   private void timeout(long deadline){long remaining=deadline-System.nanoTime();if(remaining<=0)throw new V2Exception(503,"search_timeout","Search timed out");jdbc.execute("SET LOCAL statement_timeout = "+Math.max(1,java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(remaining)));}
   private static boolean timeout(Throwable e){for(Throwable t=e;t!=null;t=t.getCause())if(t instanceof org.springframework.transaction.TransactionTimedOutException || t instanceof java.sql.SQLException s && "57014".equals(s.getSQLState()))return true;return false;}
   private JsonNode json(String s){try{return mapper.readTree(s);}catch(java.io.IOException e){throw new IllegalStateException("Invalid stored JSON");}}

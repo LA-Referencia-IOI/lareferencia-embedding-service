@@ -448,19 +448,19 @@ Current coverage includes:
 
 See the [harvester-to-vector workflow](docs/HARVESTER-EMBEDDINGS.es.md) for the complete export, calculation and import workflow.
 
-See [Python scripts](scripts/python/README.md) for computing embeddings from harvester exports and importing the resulting packages directly into PostgreSQL v2.
+See [Python scripts](scripts/python/README.md) for computing embeddings from harvester exports and importing them directly into the v2 PostgreSQL schema. The importer creates or reuses compatible shared indexations and attaches the new collection.
 
 For a consolidated guide to the platform, end-to-end workflow, API examples and operations, see [Platform Guide](docs/PLATFORM-GUIDE.md). For step-by-step API and import examples, see [Document-to-vector workflows](docs/WORKFLOWS.md).
 
 Set `DVP_ENABLED=true` to expose v2 endpoints. The tracked application configuration
 enables v2 by default; Docker Compose defaults it to disabled. V2 supports collections,
-documents, immutable profiles, index configurations, preparation, deferred generation
-imports, vector retrieval, and exact and approximate search. See [Phase 4 documents](docs/phase-4-documents.md),
-[Phase 5 profiles](docs/phase-5-profiles.md), [Phase 8 preparation](docs/phase-8-preparation.md),
-[Phase 9 generation](docs/phase-9-generation.md), [Phase 10 imports](docs/phase-10-imports.md),
-[Phase 11 retrieval](docs/phase-11-vector-retrieval.md), and [Phases 12–13 search](docs/phases-12-13-search.md)
-for usage, limits, compatibility and rollback. The [operations runbook](docs/phase-14-operations.md)
-contains readiness, backup and recovery guidance and the [synthetic capacity report](docs/phase-14-capacity.md).
+documents, immutable profiles, shared indexations, deferred generation, imports,
+vector retrieval, and exact and approximate search. Collections and indexations have
+a many-to-many relationship; generation jobs prepare texts internally. See the
+[architecture](docs/lareferencia-embedding-service-architecture.md) and
+[Platform Guide](docs/PLATFORM-GUIDE.md) for the current contract and operations.
+The [phase records](docs/coding/IMPLEMENTATION_PLAN.md) and
+[synthetic capacity report](docs/coding/phase-14-capacity.md) are historical records.
 
 Creating a collection requires an `Idempotency-Key` header:
 

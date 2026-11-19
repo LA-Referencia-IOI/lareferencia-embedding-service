@@ -1,5 +1,7 @@
 # Phase 14: operations and recovery
 
+> **Historical implementation record:** This document describes an earlier implementation phase and may contain obsolete API routes, schemas, or behavior. For the current contract and examples, see the [Platform Guide](../PLATFORM-GUIDE.md), [Workflows](../WORKFLOWS.md), and [architecture](../lareferencia-embedding-service-architecture.md).
+
 ## Deployment and readiness
 
 Use Java 21, the versioned Flyway migrations, and an administrator-installed pgvector extension >= 0.8.0. Do not grant extension installation or schema administration through the API. Start with v2 disabled, verify the legacy API, then enable v2 on the API role and start worker roles after confirming their configuration. `DVP_ROLE=API`, `WORKER`, or `ALL` selects process responsibilities; `DVP_WORKERS_ENABLED=true` is required on worker-capable processes. Verify `DVP_ENABLED`, import settings and datasource overrides explicitly for each process: Compose and standalone defaults can differ. Health details for the `dvp` component report extension version, role, enabled features and the number of configured providers without returning endpoints or credentials. Database or extension failure reports DOWN. The provider count confirms configuration only; it does **not** prove network reachability, credentials, model availability or embedding quality.

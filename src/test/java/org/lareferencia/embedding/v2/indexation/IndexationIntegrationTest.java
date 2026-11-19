@@ -6,6 +6,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.UUID;
+import java.util.Set;
+import java.util.HashSet;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.lareferencia.embedding.integration.TestDatabase;
@@ -40,12 +42,48 @@ class IndexationIntegrationTest {
       """,id,"p-"+id,"model-"+id,dimensions,id.toString().replace("-","")+id.toString().replace("-",""));return id;}
   private String path(UUID c){return "/api/v2/collections/"+c+"/indexations";}
   private JsonNode create(UUID c,UUID p,String strategy,int status) throws Exception {
-    String body="{\"slug\":\"test\",\"profile_id\":\""+p+"\",\"ann_strategy\":\""+strategy+"\"}";
+    String body="{\"slug\":\"test-"+c+"\",\"profile_id\":\""+p+"\",\"ann_strategy\":\""+strategy+"\"}";
     return mapper.readTree(mvc.perform(post(path(c)).header("Idempotency-Key",UUID.randomUUID().toString()).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().is(status)).andReturn().getResponse().getContentAsString());
   }
   private void run(UUID expectedJob) throws Exception {
     var lease=jobs.claim("test-"+UUID.randomUUID(),java.util.Set.of("maintenance")).orElseThrow();assertEquals(expectedJob,lease.jobId());
     handlers.find("maintenance").orElseThrow().run(lease,jobs);assertTrue(jobs.finishIfComplete(lease));
+  }
+  @Test void createsIndependentIndexationThenAttachesCollections() throws Exception {
+    UUID profile=profile(3),first=collection(),second=collection();String slug="global-"+UUID.randomUUID();
+    String body="{\"slug\":\""+slug+"\",\"profile_id\":\""+profile+"\",\"ann_strategy\":\"none\"}";
+    var response=mvc.perform(post("/api/v2/indexations").header("Idempotency-Key",UUID.randomUUID().toString()).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isAccepted()).andReturn();
+    var created=mapper.readTree(response.getResponse().getContentAsString());String id=created.path("id").asText();assertFalse(created.has("collection_id"));
+    assertEquals("/api/v2/indexations/"+id,response.getResponse().getHeader("Location"));
+    assertNull(jobs.find(UUID.fromString(created.path("job_id").asText())).orElseThrow().collectionId());
+    run(UUID.fromString(created.path("job_id").asText()));
+    mvc.perform(get("/api/v2/indexations/"+id)).andExpect(status().isOk()).andExpect(jsonPath("$.state").value("ready"));
+    mvc.perform(put("/api/v2/indexations/"+id+"/collections/"+first)).andExpect(status().isNoContent());
+    mvc.perform(post("/api/v2/indexations/"+id+"/collections").contentType(MediaType.APPLICATION_JSON).content("{\"collection_id\":\""+second+"\"}")).andExpect(status().isNoContent());
+    mvc.perform(put(path(second)+"/"+id)).andExpect(status().isNoContent());
+    mvc.perform(get("/api/v2/indexations/"+id+"/collections")).andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(2));
+    mvc.perform(get(path(first))).andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(1));
+    assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM information_schema.columns WHERE table_schema='dvp' AND table_name='indexations' AND column_name='collection_id'",Integer.class));
+  }
+  @Test void globalListingShowsSharedIndexationsAndFiltersCollections() throws Exception {
+    UUID first=collection(),second=collection(),third=collection();
+    var index=create(first,profile(3),"none",202);var other=create(third,profile(3),"none",202);
+    String id=index.path("id").asText();
+    mvc.perform(put(path(second)+"/"+id)).andExpect(status().isNoContent());
+    var global=mapper.readTree(mvc.perform(get("/api/v2/indexations").param("limit","1000")).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+    assertEquals(1,java.util.stream.StreamSupport.stream(global.path("items").spliterator(),false).filter(x->x.path("id").asText().equals(id)).count());
+    var all=mapper.readTree(mvc.perform(get("/api/v2/indexations").param("collection_id",second.toString())).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+    assertEquals(1,all.path("items").size());var item=all.path("items").get(0);
+    assertEquals(id,item.path("id").asText());assertFalse(item.has("collection_id"));
+    var collections=new HashSet<String>();item.path("collection_ids").forEach(x->collections.add(x.asText()));
+    assertEquals(Set.of(first.toString(),second.toString()),collections);
+    mvc.perform(put(path(second)+"/"+other.path("id").asText())).andExpect(status().isNoContent());
+    var page=mapper.readTree(mvc.perform(get("/api/v2/indexations").param("collection_id",second.toString()).param("limit","1")).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+    String cursor=page.path("next_cursor").asText();assertFalse(cursor.isEmpty());
+    var next=mapper.readTree(mvc.perform(get("/api/v2/indexations").param("collection_id",second.toString()).param("limit","1").param("cursor",cursor)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+    assertNotEquals(page.path("items").get(0).path("id").asText(),next.path("items").get(0).path("id").asText());assertTrue(next.path("next_cursor").isNull());
+    mvc.perform(get("/api/v2/indexations").param("collection_id",first.toString()).param("cursor",cursor)).andExpect(status().isBadRequest());
+    mvc.perform(get("/api/v2/indexations").param("collection_id",UUID.randomUUID().toString())).andExpect(status().isNotFound());
   }
   @Test void createsProvisioningJobAndBuildsRealAnnIndex() throws Exception {
     UUID c=collection(),p=profile(3);JsonNode created=create(c,p,"hnsw_vector",202);UUID i=UUID.fromString(created.path("id").asText());
@@ -253,6 +291,12 @@ class IndexationIntegrationTest {
     assertTrue(create.path("requestBody").path("content").path("application/json").has("example"));
     assertTrue(paths.path("/api/v2/collections/{collection}/indexations").path("get").path("parameters").toString().contains("limit"));
     assertTrue(paths.path("/api/v2/collections/{collection}/indexations/{id}/maintenance-jobs").path("post").path("responses").has("202"));
+    var global=paths.path("/api/v2/indexations").path("post");assertTrue(global.path("responses").has("202"));
+    assertTrue(global.path("requestBody").path("content").path("application/json").has("example"));
+    var association=paths.path("/api/v2/indexations/{indexation}/collections");
+    assertTrue(association.has("get"));assertTrue(association.path("post").path("responses").has("204"));
+    assertTrue(association.path("post").path("requestBody").path("content").path("application/json").toString().contains("collection_id"));
+    assertTrue(paths.path("/api/v2/indexations/{indexation}/collections/{collection}").path("put").path("responses").has("204"));
   }
 
 }

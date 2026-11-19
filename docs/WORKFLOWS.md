@@ -87,14 +87,14 @@ curl -i -X POST "$BASE/api/v2/embedding-profiles" \
 P='<HTTP_PROFILE_UUID>'
 ```
 
-An `import_only` profile cannot run a generation job or text search. Generation and search share the profile's model space but use its document and query preparation respectively.
+An `import_only` profile cannot run a generation job. Text search requires a separate compatible HTTP profile in `query.profile_id`. Generation and search share the profile's model space but use its document and query preparation respectively.
 
 ## Step 4. Create and provision an indexation
 
 **Prerequisites:** collection `C` and compatible profile `P` exist; an enabled worker can process the provisioning job.
 
 ```bash
-curl -i -X POST "$BASE/api/v2/collections/$C/indexations" \
+curl -i -X POST "$BASE/api/v2/indexations" \
   -H 'Content-Type: application/json' \
   -H 'Idempotency-Key: workflow-api-index-001' \
   -d "{\"slug\":\"titles_abstracts\",\"profile_id\":\"$P\",\"selection\":{\"kinds\":[\"title\",\"abstract\"],\"languages\":[]},\"chunking\":{\"mode\":\"none\"},\"metric\":\"cosine\",\"ann_strategy\":\"hnsw_vector\"}"
@@ -111,10 +111,11 @@ Poll the job and inspect the indexation:
 
 ```bash
 curl "$BASE/api/v2/jobs/$J"
-curl "$BASE/api/v2/collections/$C/indexations/$I"
+curl "$BASE/api/v2/indexations/$I"
+curl -i -X PUT "$BASE/api/v2/indexations/$I/collections/$C"
 ```
 
-Continue only after the job succeeds and the indexation has `state: "ready"`. The selection `kinds:["abstract"]` selects only abstracts; `languages:[]` allows all languages. With `chunking.mode=none`, each selected text forms one vector unit. The title from step 2 is not selected by this example. An empty `kinds` list would select all text kinds, including titles.
+Continue only after the job succeeds, the indexation has `state: "ready"`, and the collection is attached. The selection `kinds:["abstract"]` selects only abstracts; `languages:[]` allows all languages. With `chunking.mode=none`, each selected text forms one vector unit. Both titles and abstracts from step 2 are selected by this example. An empty `kinds` list would select all text kinds, including titles.
 
 ## Step 5. Generate vectors
 
@@ -146,7 +147,7 @@ To process all documents captured in the collection, submit a new job with `{"do
 For this document and indexation:
 
 ```bash
-curl "$BASE/api/v2/collections/$C/indexations/$I/documents/$D/vectors"
+curl "$BASE/api/v2/indexations/$I/documents/$D/vectors?collection_id=$C"
 ```
 
 **Expected:** 200 with `object: "list"`, the indexation profile `model`, and all vectors in `data[].embedding`; this profile returns 1024 values per vector. An existing document without vectors returns 200 with empty `data`.
@@ -158,7 +159,7 @@ There is no single endpoint that returns vectors for every document in a collect
 **Prerequisites:** indexation `I` is ready and contains current vectors. Text search additionally requires its HTTP provider. The following uses explicit exact mode, so it does not require an ANN index:
 
 ```bash
-curl -X POST "$BASE/api/v2/collections/$C/indexations/$I/search" \
+curl -X POST "$BASE/api/v2/indexations/$I/search?collection_id=$C" \
   -H 'Content-Type: application/json' \
   -d '{"query":{"text":"How can research be reused?"},"mode":"exact","top_n":10,"result_unit":"document","include":["texts","metadata"]}'
 ```
@@ -248,14 +249,14 @@ curl -i -X POST "$BASE/api/v2/embedding-profiles" \
 P='<HTTP_PROFILE_UUID>'
 ```
 
-An `import_only` profile supports importing externally produced vectors but cannot generate vectors or perform text search.
+An `import_only` profile supports importing externally produced vectors but cannot generate vectors. Text search requires a separate compatible HTTP profile in `query.profile_id`.
 
 ## Step 4. Create and provision an indexation
 
 **Prerequisites:** collection `C` and compatible HTTP profile `P` exist; the worker can process provisioning.
 
 ```bash
-curl -i -X POST "$BASE/api/v2/collections/$C/indexations" \
+curl -i -X POST "$BASE/api/v2/indexations" \
   -H 'Content-Type: application/json' \
   -H 'Idempotency-Key: workflow-import-index-001' \
   -d "{\"slug\":\"abstracts\",\"profile_id\":\"$P\",\"selection\":{\"kinds\":[\"abstract\"],\"languages\":[]},\"chunking\":{\"mode\":\"none\"},\"metric\":\"cosine\",\"ann_strategy\":\"hnsw_vector\"}"
@@ -267,10 +268,11 @@ curl -i -X POST "$BASE/api/v2/collections/$C/indexations" \
 I='<INDEXATION_UUID_FROM_STEP_4>'
 J='<PROVISIONING_JOB_UUID_FROM_STEP_4>'
 curl "$BASE/api/v2/jobs/$J"
-curl "$BASE/api/v2/collections/$C/indexations/$I"
+curl "$BASE/api/v2/indexations/$I"
+curl -i -X PUT "$BASE/api/v2/indexations/$I/collections/$C"
 ```
 
-Continue after the provisioning job succeeds and `state` is `ready`. This configuration selects abstracts in any language, with one unit per selected text. `ready` does not mean that vectors have been generated.
+Continue after the provisioning job succeeds, `state` is `ready`, and the collection is attached. This configuration selects abstracts in any language, with one unit per selected text. `ready` does not mean that vectors have been generated.
 
 ## Step 5. Generate vectors for the imported documents
 
@@ -306,7 +308,7 @@ curl --get "$BASE/api/v2/collections/$C/documents/by-external-id" \
 
 ```bash
 D='<DOCUMENT_UUID_RETURNED_ABOVE>'
-curl "$BASE/api/v2/collections/$C/indexations/$I/documents/$D/vectors"
+curl "$BASE/api/v2/indexations/$I/documents/$D/vectors?collection_id=$C"
 ```
 
 **Expected:** 200 with the indexation profile `model` and the vectors in `data[].embedding`. An empty `data` list means no vectors were returned; inspect generation job errors. To retrieve vectors for every document in the collection, use the paginated example below.
@@ -316,7 +318,7 @@ curl "$BASE/api/v2/collections/$C/indexations/$I/documents/$D/vectors"
 **Prerequisites:** indexation `I` is ready and contains current vectors; its HTTP provider is reachable for the text query.
 
 ```bash
-curl -X POST "$BASE/api/v2/collections/$C/indexations/$I/search" \
+curl -X POST "$BASE/api/v2/indexations/$I/search?collection_id=$C" \
   -H 'Content-Type: application/json' \
   -d '{"query":{"text":"How can research data be shared?"},"mode":"exact","top_n":10,"result_unit":"document","include":["texts","metadata"]}'
 ```
@@ -377,11 +379,11 @@ curl "$BASE/api/v2/jobs/$J"
 curl "$BASE/api/v2/jobs/$J/errors?limit=100"
 ```
 
-Continue when the job reports `succeeded`. For `completed_with_errors` or `failed`, inspect the errors and `global_error_code`; correct the file or configuration and submit a new import. The service creates the profile and indexation if absent, or reuses matching resources. A matching slug with different configuration rejects that record; a profile fingerprint already used under another slug also conflicts. An existing indexation must be ready. Each record and its resources commit together; other records already committed are retained.
+Continue when the job reports `succeeded`. For `completed_with_errors` or `failed`, inspect the errors and `global_error_code`; correct the file or configuration and submit a new import. The service creates the profile and indexation if absent, or reuses matching resources. A matching slug with different configuration rejects that record; a matching profile fingerprint is reused even when the supplied slug differs. An existing indexation must be ready. Each record and its resources commit together; other records already committed are retained.
 
 ## Step 4. Find the created or reused resources
 
-**Prerequisites:** the import job succeeded for the example record. Profiles are global; indexations and documents belong to the collection.
+**Prerequisites:** the import job succeeded for the example record. Profiles are global, indexations can be shared by multiple collections, and documents belong to one collection.
 
 ```bash
 curl "$BASE/api/v2/embedding-profiles?limit=100"
@@ -404,7 +406,7 @@ The vector table can be ready while `ann_state` is `pending`; exact search does 
 **Prerequisites:** the document `D` and ready indexation `I` were found in step 4, and the record imported successfully.
 
 ```bash
-curl "$BASE/api/v2/collections/$C/indexations/$I/documents/$D/vectors"
+curl "$BASE/api/v2/indexations/$I/documents/$D/vectors?collection_id=$C"
 ```
 
 **Expected:** 200 with both imported vectors in `data[].embedding`. The response does not include their import IDs. If `limit` is specified, follow `next_cursor` for additional pages. To retrieve vectors for every document in the collection, use the [paginated collection example](#retrieving-vectors-for-an-entire-collection).
@@ -413,10 +415,10 @@ Imported document vectors are independent of texts and are retained when texts o
 
 ## Step 6. Search using an external vector
 
-**Prerequisites:** indexation `I` is ready and contains the imported vectors. Supply a query vector of the same dimensions and model space as the profile. With `import_only`, text queries and provider-based generation are unavailable.
+**Prerequisites:** indexation `I` is ready and contains the imported vectors. Supply a query vector of the same dimensions and model space as the profile. An `import_only` indexation cannot generate vectors; text queries require a separate compatible HTTP profile in `query.profile_id`.
 
 ```bash
-curl -X POST "$BASE/api/v2/collections/$C/indexations/$I/search" \
+curl -X POST "$BASE/api/v2/indexations/$I/search?collection_id=$C" \
   -H 'Content-Type: application/json' \
   -d '{"query":{"vector":[0.1,0.2,0.3]},"mode":"exact","top_n":10,"result_unit":"document","include":["metadata"]}'
 ```
@@ -428,7 +430,7 @@ curl -X POST "$BASE/api/v2/collections/$C/indexations/$I/search" \
 **Prerequisites:** steps 3–6 succeeded, the indexation uses an HNSW strategy, and a worker is enabled. Follow [build or verify the ANN index](#optional-build-or-verify-the-ann-index), using `C` and `I` from this workflow. Wait until the maintenance job succeeds and `ann_state` is `ready` before searching.
 
 ```bash
-curl -X POST "$BASE/api/v2/collections/$C/indexations/$I/search" \
+curl -X POST "$BASE/api/v2/indexations/$I/search?collection_id=$C" \
   -H 'Content-Type: application/json' \
   -d '{"query":{"vector":[0.1,0.2,0.3]},"mode":"approximate","top_n":10,"result_unit":"document","include":["metadata"]}'
 ```
@@ -466,11 +468,11 @@ while True:
     for document in page['items']:
         vector_cursor = None
         while True:
-            vector_parameters = {'limit': 100}
+            vector_parameters = {'limit': 100, 'collection_id': collection}
             if vector_cursor:
                 vector_parameters['cursor'] = vector_cursor
             vectors = get(
-                f"/api/v2/collections/{collection}/indexations/{indexation}/documents/{document['id']}/vectors",
+                f"/api/v2/indexations/{indexation}/documents/{document['id']}/vectors",
                 vector_parameters,
             )
             print(json.dumps(vectors, ensure_ascii=False))
@@ -484,6 +486,17 @@ PY
 ```
 
 **Expected:** one or more JSON responses for each existing document, with its vectors for indexation `I`. A collection with no documents produces no output.
+
+## Optional: share an indexation with another collection
+
+**Prerequisites:** indexation `I` and the other collection already exist. Attach it before creating generation jobs for documents in that collection:
+
+```bash
+OTHER_C='<OTHER_COLLECTION_UUID>'
+curl -i -X PUT "$BASE/api/v2/indexations/$I/collections/$OTHER_C"
+```
+
+**Expected:** 204. Searches at `/api/v2/indexations/$I/search` cover both collections by default; add `?collection_id=$OTHER_C` to filter. Generation and import jobs remain scoped to a collection; a global indexation provisioning job has no collection.
 
 ## Optional: build or verify the ANN index
 

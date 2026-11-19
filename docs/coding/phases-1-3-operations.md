@@ -1,5 +1,7 @@
 # Phases 1–3: operation, compatibility and verification
 
+> **Historical implementation record:** This document describes an earlier implementation phase and may contain obsolete API routes, schemas, or behavior. For the current contract and examples, see the [Platform Guide](../PLATFORM-GUIDE.md), [Workflows](../WORKFLOWS.md), and [architecture](../lareferencia-embedding-service-architecture.md).
+
 This release preserves the v1 embedding API, introduces an additive `dvp` registry
 and implements v2 Collections. The current implementation also exposes the [document API](phase-4-documents.md),
 [profile API](phase-5-profiles.md), and [job and indexation APIs](phases-5-6-persistent-jobs.md).

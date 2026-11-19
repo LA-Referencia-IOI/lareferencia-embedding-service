@@ -1,5 +1,7 @@
 # Phases 12–13: semantic search
 
+> **Historical implementation record:** This document describes an earlier implementation phase and may contain obsolete API routes, schemas, or behavior. For the current contract and examples, see the [Platform Guide](../PLATFORM-GUIDE.md), [Workflows](../WORKFLOWS.md), and [architecture](../lareferencia-embedding-service-architecture.md).
+
 Search one ready indexation with an external vector or a text query. Text search requires an HTTP profile and sends the prepared query to its configured embedding provider; confirm that provider is authorized to receive the query. External vectors must come from the same model, revision and preparation space as the indexation; the service validates dimensions and numeric values but cannot verify provenance.
 
 ```bash

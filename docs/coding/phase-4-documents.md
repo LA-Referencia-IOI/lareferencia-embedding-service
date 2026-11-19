@@ -1,5 +1,7 @@
 # Phase 4: documents and source texts
 
+> **Historical implementation record:** This document describes an earlier implementation phase and may contain obsolete API routes, schemas, or behavior. For the current contract and examples, see the [Platform Guide](../PLATFORM-GUIDE.md), [Workflows](../WORKFLOWS.md), and [architecture](../lareferencia-embedding-service-architecture.md).
+
 Enable v2 with `DVP_ENABLED=true`. These endpoints use the existing deployment access boundary; a collection is not a security tenant. Create a collection first as described in [Phases 1–3 operations](phases-1-3-operations.md). No UI or inference call is included in document ingestion.
 
 All document routes are under `/api/v2/collections/{collection_id}/documents`. External IDs and text IDs are case-sensitive and preserved exactly; URL-encode query values, including `/` and `:`. IDs are scoped to the collection and text keys to the document.

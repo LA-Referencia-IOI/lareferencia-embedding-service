@@ -1,5 +1,7 @@
 # Persistent jobs and index maintenance
 
+> **Historical implementation record:** This document describes an earlier implementation phase and may contain obsolete API routes, schemas, or behavior. For the current contract and examples, see the [Platform Guide](../PLATFORM-GUIDE.md), [Workflows](../WORKFLOWS.md), and [architecture](../lareferencia-embedding-service-architecture.md).
+
 The v2 job runtime stores jobs, item state, retry times, progress and checkpoints in PostgreSQL. An API process can report jobs and create an idempotent retry of failed items. The runtime only claims job kinds with a registered handler; the maintenance handler provisions and maintains index configurations. The preparation handler is available in [Phase 8](phase-8-preparation.md), generation in [Phase 9](phase-9-generation.md), and opt-in imports in [Phase 10](phase-10-imports.md).
 
 ## Configuration and deployment

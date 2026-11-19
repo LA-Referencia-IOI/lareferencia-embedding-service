@@ -105,7 +105,7 @@ public class GenerationHandler implements JobHandler {
   private Config config(JobRepository.Job job) {
     return jdbc.query("""
         SELECT i.vector_table,i.metric,i.ann_strategy,i.state,p.id,p.slug,p.model,p.model_revision,p.dimensions,p.execution_mode,p.provider_ref,p.preparation::text,p.fingerprint,p.created_at
-        FROM dvp.indexations i JOIN dvp.embedding_profiles p ON p.id=i.profile_id WHERE i.id=? AND i.collection_id=?
+        FROM dvp.indexations i JOIN dvp.embedding_profiles p ON p.id=i.profile_id WHERE i.id=? AND EXISTS (SELECT 1 FROM dvp.collection_indexations ci WHERE ci.indexation_id=i.id AND ci.collection_id=?)
         """,(rs,n)->{
           try {
             if(!"ready".equals(rs.getString(4))) throw new V2Exception(409,"indexation_unavailable","Index configuration is not ready");
@@ -152,7 +152,7 @@ public class GenerationHandler implements JobHandler {
     Boolean exists=tx.query("SELECT id FROM dvp.documents WHERE id=? AND collection_id=? FOR UPDATE",(org.springframework.jdbc.core.ResultSetExtractor<Boolean>)rs->rs.next(),item.documentId(),job.collectionId());
     if(!Boolean.TRUE.equals(exists)) throw new SourceChanged();
     if(!sourceSnapshot.equals(sourceRevisions(tx,item.documentId()))) throw new SourceChanged();
-    Boolean ready=tx.queryForObject("SELECT EXISTS(SELECT 1 FROM dvp.indexations WHERE id=? AND collection_id=? AND state='ready')",Boolean.class,job.indexationId(),job.collectionId());
+    Boolean ready=tx.queryForObject("SELECT EXISTS(SELECT 1 FROM dvp.indexations WHERE id=? AND state='ready' AND EXISTS (SELECT 1 FROM dvp.collection_indexations ci WHERE ci.indexation_id=dvp.indexations.id AND ci.collection_id=?))",Boolean.class,job.indexationId(),job.collectionId());
     if(!Boolean.TRUE.equals(ready)) throw new V2Exception(409,"indexation_unavailable","Index configuration is not ready");
   }
   private void validate(float[] values,Config config) {

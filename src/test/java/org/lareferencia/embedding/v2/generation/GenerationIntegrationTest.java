@@ -44,9 +44,9 @@ class GenerationIntegrationTest {
         VALUES (?,?,?,'v1',2,?,?, '{"version":"identity-v1","document_prefix":"passage: ","query_prefix":""}'::jsonb,?)
         """,p,"p-"+p,"model",mode,mode.equals("http")?"test":null,(p.toString().replace("-","")).repeat(2));
     jdbc.update("""
-        INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state)
-        VALUES (?,?,?,?,'{}'::jsonb,?::jsonb,'cosine',?,?,'ready','pending')
-        """,i,c,"index",p,chunking,strategy,table);
+        INSERT INTO dvp.indexations(id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state)
+        VALUES (?,?,?,'{}'::jsonb,?::jsonb,'cosine',?,?,'ready','pending')
+        """,i,"index-"+i,p,chunking,strategy,table);jdbc.update("INSERT INTO dvp.collection_indexations(indexation_id,collection_id) VALUES (?,?)",i,c);
     jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY,document_id uuid NOT NULL,"
         +"indexation_id uuid NOT NULL CHECK(indexation_id='"+i+"'),embedding vector(2) NOT NULL,input_hash char(64) NOT NULL,"
         +"origin varchar(10) NOT NULL,origin_job_id uuid,created_at timestamptz NOT NULL DEFAULT now(),"
@@ -60,6 +60,17 @@ class GenerationIntegrationTest {
   private String route(Fixture f) {return "/api/v2/collections/"+f.collection()+"/indexations/"+f.indexation()+"/generation-jobs";}
   private UUID submit(Fixture f,String body,int expected) throws Exception {var r=mvc.perform(post(route(f)).header("Idempotency-Key",UUID.randomUUID().toString()).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().is(expected)).andReturn();return expected==202?UUID.fromString(mapper.readTree(r.getResponse().getContentAsString()).path("id").asText()):null;}
   private void run(UUID job) throws Exception {var lease=jobs.claim("test-"+UUID.randomUUID(),Set.of("generate")).orElseThrow();assertEquals(job,lease.jobId());handlers.find("generate").orElseThrow().run(lease,jobs);assertTrue(jobs.finishIfComplete(lease));}
+  @Test void generationUsesTheRequestedCollectionInASharedIndexation() throws Exception {
+    Fixture first=fixture("http","none","{\"mode\":\"none\"}");UUID other=UUID.randomUUID();
+    jdbc.update("INSERT INTO dvp.collections(id,slug,name) VALUES (?,?,'other')",other,"c-"+other);
+    jdbc.update("INSERT INTO dvp.collection_indexations(indexation_id,collection_id) VALUES (?,?)",first.indexation(),other);
+    Fixture second=new Fixture(other,first.indexation(),first.table());UUID a=document(first,"a","first"),b=document(second,"b","second");
+    when(provider.batchSize(any())).thenReturn(16);when(provider.embed(any(),anyList())).thenReturn(List.of(new float[]{1,2}));
+    UUID job=submit(second,"{}",202);run(job);
+    assertEquals("succeeded",jobs.find(job).orElseThrow().status());
+    assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=?",Integer.class,a));
+    assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM dvp.vector_units WHERE document_id=?",Integer.class,b));
+  }
   @Test void generatesOnceAndReusesIdenticalCurrentContentWithinIndexation() throws Exception {
     Fixture f=fixture("http","none","{\"mode\":\"none\"}");UUID a=document(f,"a","same"),b=document(f,"b","same");
     when(provider.batchSize(any())).thenReturn(16);when(provider.embed(any(),anyList())).thenReturn(List.of(new float[]{1,2}));

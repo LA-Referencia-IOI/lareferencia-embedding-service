@@ -75,7 +75,7 @@ public class DocumentController {
     return response(service.delete(collection,id,query,false,ifMatch,key));
   }
   @DeleteMapping("/{id}/texts")
-  @Operation(summary="Delete a source text and its representations")
+  @Operation(summary="Delete a source text",description="Deletes the selected text. Existing document vectors are retained and may become stale.")
   @Parameters({@Parameter(name="knd",in=ParameterIn.QUERY,required=true,description="Text kind"),
       @Parameter(name="lng",in=ParameterIn.QUERY,description="Optional text language"),
       @Parameter(name="ordinal",in=ParameterIn.QUERY,description="Zero-based occurrence within the kind and language",schema=@Schema(defaultValue="0",minimum="0"))})

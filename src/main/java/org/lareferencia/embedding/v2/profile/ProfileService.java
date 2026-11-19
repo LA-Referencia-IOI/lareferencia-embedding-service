@@ -52,7 +52,7 @@ public class ProfileService {
     var created=repository.insert(p,fingerprint);if(created.isPresent())return created.get();
     var existing=repository.duplicate(p.slug(),fingerprint)
         .orElseThrow(()->new V2Exception(409,"profile_conflict","Profile conflicts with an existing resource"));
-    if(!existing.slug().equals(p.slug()) || !existing.fingerprint().equals(fingerprint))
+    if(!existing.fingerprint().equals(fingerprint))
       throw new V2Exception(409,"profile_conflict","Profile conflicts with an existing resource");
     return existing;
   }

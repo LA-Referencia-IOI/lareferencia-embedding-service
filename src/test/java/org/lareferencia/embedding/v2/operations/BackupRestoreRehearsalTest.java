@@ -32,7 +32,7 @@ class BackupRestoreRehearsalTest {
     byte[] bytes="{\"schema_version\":\"1\",\"external_id\":\"synthetic\"}\n".getBytes(StandardCharsets.UTF_8);String hash=HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
     jdbc.update("INSERT INTO dvp.collections(id,slug,name) VALUES (?,?,?)",c,"recovery-"+c,"synthetic");
     jdbc.update("INSERT INTO dvp.embedding_profiles(id,slug,model,model_revision,dimensions,execution_mode,preparation,fingerprint) VALUES (?,?,'synthetic','v1',2,'import_only','{}',?)",p,"recovery-"+p,p.toString().replace("-","").repeat(2));
-    jdbc.update("INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state) VALUES (?,?,?,?,'{}','{\"mode\":\"none\"}','cosine','none',?,'ready','disabled')",i,c,"recovery",p,table);
+    jdbc.update("INSERT INTO dvp.indexations(id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state) VALUES (?,?,?,'{}','{\"mode\":\"none\"}','cosine','none',?,'ready','disabled')",i,"recovery",p,table);jdbc.update("INSERT INTO dvp.collection_indexations(indexation_id,collection_id) VALUES (?,?)",i,c);
     jdbc.execute("CREATE TABLE dvp."+table+" (id uuid PRIMARY KEY,embedding vector(2) NOT NULL)");jdbc.update("INSERT INTO dvp."+table+" VALUES (?, '[1,2]')",UUID.randomUUID());
     jdbc.update("INSERT INTO dvp.jobs(id,collection_id,kind,status,parameters,checkpoint) VALUES (?,?,'import','succeeded','{}','{\"ordinal\":1}')",job,c);
     jdbc.update("INSERT INTO dvp.import_files(job_id,storage_key,sha256,format,byte_size) VALUES (?,?,?,'jsonl',?)",job,key,hash,bytes.length);

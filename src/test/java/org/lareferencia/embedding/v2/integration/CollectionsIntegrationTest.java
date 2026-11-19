@@ -85,7 +85,7 @@ class CollectionsIntegrationTest {
     for(UUID profile:List.of(first,second,unused))jdbc.update("INSERT INTO dvp.embedding_profiles(id,slug,model,model_revision,dimensions,execution_mode,preparation,fingerprint) VALUES (?,?,?,'v1',2,'import_only','{}',?)",profile,"p-"+profile,"model",profile.toString().replace("-","").repeat(2));
     for(int n=0;n<4;n++) {
       UUID index=UUID.randomUUID();UUID owner=n==3?otherCollection:c;UUID profile=n==2?second:first;
-      jdbc.update("INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state) VALUES (?,?,?,?,'{}','{\"mode\":\"none\"}','cosine','none',?,?, 'disabled')",index,owner,"idx-"+n,profile,"vec_"+index.toString().replace("-",""),n==1?"failed":"ready");
+      jdbc.update("INSERT INTO dvp.indexations(id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state) VALUES (?,?,?,'{}','{\"mode\":\"none\"}','cosine','none',?,?, 'disabled')",index,"idx-"+index,profile,"vec_"+index.toString().replace("-",""),n==1?"failed":"ready");jdbc.update("INSERT INTO dvp.collection_indexations(indexation_id,collection_id) VALUES (?,?)",index,owner);
     }
     mvc.perform(get(PATH+"/"+id)).andExpect(status().isOk()).andExpect(jsonPath("$.counts.documents").value(2))
         .andExpect(jsonPath("$.counts.indexations").value(3)).andExpect(jsonPath("$.counts.embedding_profiles").doesNotExist());

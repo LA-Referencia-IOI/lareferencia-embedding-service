@@ -1,5 +1,7 @@
 # Phase 11: per-document vector retrieval
 
+> **Historical implementation record:** This document describes an earlier implementation phase and may contain obsolete API routes, schemas, or behavior. For the current contract and examples, see the [Platform Guide](../PLATFORM-GUIDE.md), [Workflows](../WORKFLOWS.md), and [architecture](../lareferencia-embedding-service-architecture.md).
+
 With v2 enabled, the following read-only routes return stored current vectors without calling a model provider:
 
 ```text

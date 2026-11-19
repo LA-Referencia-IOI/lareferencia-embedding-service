@@ -30,7 +30,7 @@ class SearchIntegrationTest {
     UUID c=UUID.randomUUID(),p=UUID.randomUUID(),i=UUID.randomUUID();String table="vec_"+i.toString().replace("-","");
     jdbc.update("INSERT INTO dvp.collections(id,slug,name) VALUES (?,?,?)",c,"c-"+c,"test");
     jdbc.update("INSERT INTO dvp.embedding_profiles(id,slug,model,model_revision,dimensions,execution_mode,preparation,fingerprint) VALUES (?,?,'test','v1',2,'import_only','{\"version\":\"identity-v1\",\"document_prefix\":\"\",\"query_prefix\":\"\"}',?)",p,"p-"+p,p.toString().replace("-","").repeat(2));
-    jdbc.update("INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state) VALUES (?,?,?,?,'{}','{\"mode\":\"none\"}',?,?,?,'ready',?)",i,c,"index",p,metric,strategy,table,strategy.equals("none")?"disabled":"ready");
+    jdbc.update("INSERT INTO dvp.indexations(id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state) VALUES (?,?,?,'{}','{\"mode\":\"none\"}',?,?,?,'ready',?)",i,"index-"+i,p,metric,strategy,table,strategy.equals("none")?"disabled":"ready");jdbc.update("INSERT INTO dvp.collection_indexations(indexation_id,collection_id) VALUES (?,?)",i,c);
     jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY,document_id uuid NOT NULL,indexation_id uuid NOT NULL,embedding vector(2) NOT NULL,origin varchar(10) NOT NULL)");
     if(!strategy.equals("none")) {String op=switch(metric){case "l2"->"l2";case "inner_product"->"ip";default->"cosine";};String expr=strategy.equals("hnsw_halfvec")?"(embedding::halfvec(2)) halfvec_"+op+"_ops":"embedding vector_"+op+"_ops";jdbc.execute("CREATE INDEX "+table+"_ann ON dvp."+table+" USING hnsw ("+expr+")");}
     return new Fixture(c,i,table);
@@ -42,6 +42,27 @@ class SearchIntegrationTest {
     jdbc.update("INSERT INTO dvp."+f.table()+" VALUES (?,?,?,?::vector,'generated')",u,d,f.index(),vector);
   }
   Map<String,Object> search(Fixture f,String json)throws Exception {return service.search(f.collection().toString(),f.index().toString(),mapper.readTree(json));}
+  @Test void sharedIndexationRoutesFilterByCollectionForExactAndApproximateSearch() throws Exception {
+    Fixture f=fixture("cosine","hnsw_vector");UUID d=document(f,"same"),other=UUID.randomUUID();unit(f,d,0,"[1,0]");
+    jdbc.update("INSERT INTO dvp.collections(id,slug,name) VALUES (?,?,'other')",other,"c-"+other);
+    mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/v2/collections/"+other+"/indexations/"+f.index()))
+      .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNoContent());
+    Fixture second=new Fixture(other,f.index(),f.table());UUID otherDoc=document(second,"same");unit(second,otherDoc,0,"[0.9,0.1]");
+    for(String mode:List.of("exact","approximate")) {
+      String body="{\"query\":{\"vector\":[1,0]},\"mode\":\""+mode+"\",\"top_n\":10}";
+      var route="/api/v2/indexations/"+f.index()+"/search";
+      mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(route).contentType("application/json").content(body))
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.results.length()").value(2));
+      mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(route).param("collection_id",other.toString()).contentType("application/json").content(body))
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.results.length()").value(1)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.results[0].collection_id").value(other.toString()));
+    }
+    String vectors="/api/v2/indexations/"+f.index()+"/vectors";
+    mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(vectors).param("external_id","same")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isConflict());
+    mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(vectors).param("external_id","same").param("collection_id",other.toString()))
+      .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.length()").value(1));
+    mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v2/indexations/"+f.index()+"/documents/"+otherDoc+"/vectors"))
+      .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.length()").value(1));
+  }
   @Test void exactGroupsDocumentsBeforeLimitAndIncludesProjections() throws Exception {
     Fixture f=fixture("l2","hnsw_vector");UUID a=document(f,"a"),b=document(f,"b");unit(f,a,1,"[0.1,0]");unit(f,a,2,"[0.2,0]");unit(f,b,1,"[1,0]");
     var result=search(f,"{\"query\":{\"vector\":[0,0]},\"mode\":\"exact\",\"top_n\":2,\"include\":[\"texts\",\"metadata\"]}");var items=(List<?>)result.get("results");assertEquals(2,items.size());assertEquals(a,((Map<?,?>)items.get(0)).get("document_id"));assertEquals(b,((Map<?,?>)items.get(1)).get("document_id"));assertEquals("hello",((Map<?,?>)items.get(0)).get("text"));assertEquals(true,result.get("recall_guaranteed"));
@@ -161,6 +182,10 @@ class SearchIntegrationTest {
       Map.entry("/api/v2/collections/{collection}/documents","get"),
       Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/documents/{document}/vectors","get"),
       Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/vectors","get"),
+      Map.entry("/api/v2/indexations/{indexation}/vectors","get"),
+      Map.entry("/api/v2/indexations","get"),
+      Map.entry("/api/v2/indexations/{indexation}/documents/{document}/vectors","get"),
+      Map.entry("/api/v2/indexations/{indexation}/search","post"),
       Map.entry("/api/v2/collections/{collection}/indexations/{indexation}/search","post"));
     expected.forEach((path,method)->assertTrue(paths.path(path).has(method),"OpenAPI missing "+method+" "+path));
     var parameters=paths.path("/api/v2/collections/{collection}/indexations/{indexation}/vectors").path("get").path("parameters");
@@ -168,6 +193,8 @@ class SearchIntegrationTest {
     assertEquals("query",external.path("in").asText());assertTrue(external.path("required").asBoolean());
     assertTrue(java.util.stream.StreamSupport.stream(parameters.spliterator(),false).anyMatch(p->p.path("name").asText().equals("limit")));
     assertTrue(java.util.stream.StreamSupport.stream(parameters.spliterator(),false).anyMatch(p->p.path("name").asText().equals("cursor")));
+    var deleteText=paths.path("/api/v2/collections/{collection}/documents/{id}/texts").path("delete");
+    assertTrue(deleteText.path("description").asText().contains("vectors are retained"));
     assertFalse(paths.has("/api/v2/collections/{collection}/documents/{document}/vectors"));
     assertFalse(paths.has("/api/v2/collections/{collection}/document-vectors"));
     assertFalse(paths.has("/api/v2/collections/{collection}/vectors"));

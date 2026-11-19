@@ -1,5 +1,7 @@
 # Document and Vector Platform — Implementation Plan
 
+> **Historical implementation record:** This document describes an earlier implementation phase and may contain obsolete API routes, schemas, or behavior. For the current contract and examples, see the [Platform Guide](../PLATFORM-GUIDE.md), [Workflows](../WORKFLOWS.md), and [architecture](../lareferencia-embedding-service-architecture.md).
+
 **Status:** Phases 1–9 have implementation baselines; see individual records for approval history. Phase 10 is implemented and verified on the pinned database; the user authorized Phase 11. Phase 11 is implemented and verified; the user subsequently requested Phases 12–13. Phases 12 and 13 are implemented together under the user’s explicit request and have passed pinned-database regression; remaining verification and approval are recorded below. Phase 14 operational work is in progress; synthetic verification passed but production-readiness gates remain open. See the phase records for evidence.
 
 **Baseline examined:** `main`, commit `52aadb3642a787fefdc69d2d7676122021feeefb`, 2026-11-04. The working tree already contained a change to `.gitignore`; it is outside this plan.

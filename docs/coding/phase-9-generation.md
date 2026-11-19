@@ -1,5 +1,7 @@
 # Phase 9: deferred embedding generation
 
+> **Historical implementation record:** This document describes an earlier implementation phase and may contain obsolete API routes, schemas, or behavior. For the current contract and examples, see the [Platform Guide](../PLATFORM-GUIDE.md), [Workflows](../WORKFLOWS.md), and [architecture](../lareferencia-embedding-service-architecture.md).
+
 With v2 enabled, enqueue generation for a ready index configuration with an HTTP-capable profile:
 
 ```http

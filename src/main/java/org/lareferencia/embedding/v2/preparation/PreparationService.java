@@ -31,7 +31,7 @@ public class PreparationService {
         SELECT i.selection::text,i.chunking::text,i.state,p.id,p.slug,p.model,p.model_revision,p.dimensions,
                p.execution_mode,p.provider_ref,p.preparation::text,p.fingerprint,p.created_at
         FROM dvp.indexations i JOIN dvp.embedding_profiles p ON p.id=i.profile_id
-        WHERE i.id=? AND i.collection_id=?
+        WHERE i.id=? AND EXISTS (SELECT 1 FROM dvp.collection_indexations ci WHERE ci.indexation_id=i.id AND ci.collection_id=?)
         """,(rs,n)->{
           try {
             var settings=mapper.copy().setPropertyNamingStrategy(com.fasterxml.jackson.databind.PropertyNamingStrategies.SNAKE_CASE);

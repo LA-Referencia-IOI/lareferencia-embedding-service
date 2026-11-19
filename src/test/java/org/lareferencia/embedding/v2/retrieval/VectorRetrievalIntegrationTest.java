@@ -31,7 +31,7 @@ class VectorRetrievalIntegrationTest {
     jdbc.update("INSERT INTO dvp.documents(id,collection_id,external_id,metadata) VALUES (?,?,'doc','{\"year\":2024}')",d,c);
     jdbc.update("INSERT INTO dvp.source_texts(id,document_id,text_key,kind,language,content,content_hash) VALUES (?,?,'abstract','abstract','en','hello world',?)",s,d,"a".repeat(64));
     jdbc.update("INSERT INTO dvp.embedding_profiles(id,slug,model,model_revision,dimensions,execution_mode,preparation,fingerprint) VALUES (?,?,?,'v1',2,'import_only','{}',?)",p,"p-"+p,"model",p.toString().replace("-","").repeat(2));
-    jdbc.update("INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state) VALUES (?,?,?,?,'{}','{\"mode\":\"none\"}','cosine','none',?,'ready','disabled')",i,c,"idx",p,table);
+    jdbc.update("INSERT INTO dvp.indexations(id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state) VALUES (?,?,?,'{}','{\"mode\":\"none\"}','cosine','none',?,'ready','disabled')",i,"idx-"+i,p,table);jdbc.update("INSERT INTO dvp.collection_indexations(indexation_id,collection_id) VALUES (?,?)",i,c);
     jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY,document_id uuid NOT NULL,indexation_id uuid NOT NULL,embedding vector(2) NOT NULL,origin varchar(10) NOT NULL)");
     return new Fixture(c,d,i,s,table);
   }
@@ -96,7 +96,7 @@ class VectorRetrievalIntegrationTest {
   @Test void multipleDimensionsAndUnselectedTextsHaveIndependentCoverage() {
     Fixture f=fixture();unit(f,true,0);UUID profile=UUID.randomUUID(),index=UUID.randomUUID(),unit=UUID.randomUUID();String table="vec_"+index.toString().replace("-","");
     jdbc.update("INSERT INTO dvp.embedding_profiles(id,slug,model,model_revision,dimensions,execution_mode,preparation,fingerprint) VALUES (?,?,?,'v1',3,'import_only','{}',?)",profile,"p-"+profile,"model3",profile.toString().replace("-","").repeat(2));
-    jdbc.update("INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state) VALUES (?,?,?,?,'{}','{\"mode\":\"none\"}','cosine','none',?,'ready','disabled')",index,f.collection(),"second",profile,table);
+    jdbc.update("INSERT INTO dvp.indexations(id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state) VALUES (?,?,?,'{}','{\"mode\":\"none\"}','cosine','none',?,'ready','disabled')",index,"second-"+index,profile,table);jdbc.update("INSERT INTO dvp.collection_indexations(indexation_id,collection_id) VALUES (?,?)",index,f.collection());
     jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY,document_id uuid NOT NULL,indexation_id uuid NOT NULL,embedding vector(3) NOT NULL,origin varchar(10) NOT NULL)");
     jdbc.update("INSERT INTO dvp.vector_units(id,collection_id,indexation_id,document_id,ordinal,start_cp,end_cp,input_hash,prepared_text,prepared_key) VALUES (?,?,?,?,0,0,5,?,'hello',?)",unit,f.collection(),index,f.doc(),"b".repeat(64),unit.toString());
     jdbc.update("INSERT INTO dvp."+table+" VALUES (?,?,?,'[1,2,3]','generated')",unit,f.doc(),index);

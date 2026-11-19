@@ -59,6 +59,14 @@ class Part:
     count: int
 
 
+@dataclass(frozen=True)
+class IndexTarget:
+    id: uuid.UUID
+    table: str
+    profile: uuid.UUID
+    created: bool
+
+
 class Package:
     def __init__(self, source, embeddings, ann):
         source = source.resolve(strict=True)
@@ -242,14 +250,35 @@ def create_index(conn, sql, Jsonb, canonicalize, collection, recipe, build_ann):
     """, (fingerprint,)).fetchone()
     require(found is not None and found[1:] == tuple(config.values()), "Perfil existente incompatible")
     profile = found[0]
+    strategy = "hnsw_vector" if build_ann else "none"
+    selection = {"kinds": [], "languages": []}
+    chunking = {"mode": "none"}
+    # Serialize resolution with the Java API and other import processes.
+    conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", ("dvp:indexation:" + recipe["id"],))
+    existing = conn.execute("""
+        SELECT id,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state
+        FROM dvp.indexations WHERE slug=%s
+    """, (recipe["id"],)).fetchone()
+    if existing is not None:
+        index, existing_profile, existing_selection, existing_chunking, metric, existing_strategy, table, state, ann_state = existing
+        require(existing_profile == profile and existing_selection == selection and existing_chunking == chunking
+                and metric == "cosine" and existing_strategy == strategy,
+                f"La indexación {recipe['id']} existe con una configuración o perfil incompatible")
+        require(state == "ready" and (not build_ann or ann_state == "ready"),
+                f"La indexación {recipe['id']} o su índice ANN no está listo")
+        require(table == "vec_" + index.hex and conn.execute("SELECT to_regclass(%s)", ("dvp." + table,)).fetchone()[0] is not None,
+                f"La tabla de vectores de {recipe['id']} no está disponible")
+        conn.execute("INSERT INTO dvp.collection_indexations (indexation_id,collection_id) VALUES (%s,%s)", (index, collection))
+        return IndexTarget(index, table, profile, False)
+
     index = uuid.uuid4()
     table = "vec_" + index.hex
     conn.execute("""
         INSERT INTO dvp.indexations
-            (id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state)
-        VALUES (%s,%s,%s,%s,%s,%s,'cosine',%s,%s,'provisioning',%s)
-    """, (index, collection, recipe["id"], profile, Jsonb({"kinds": [], "languages": []}),
-          Jsonb({"mode": "none"}), "hnsw_vector" if build_ann else "none", table, "pending" if build_ann else "disabled"))
+            (id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state)
+        VALUES (%s,%s,%s,%s,%s,'cosine',%s,%s,'provisioning',%s)
+    """, (index, recipe["id"], profile, Jsonb(selection), Jsonb(chunking), strategy, table, "pending" if build_ann else "disabled"))
+    conn.execute("INSERT INTO dvp.collection_indexations (indexation_id,collection_id) VALUES (%s,%s)", (index, collection))
     conn.execute(sql.SQL("""
         CREATE TABLE dvp.{} (
           unit_id uuid PRIMARY KEY, document_id uuid NOT NULL,
@@ -262,7 +291,7 @@ def create_index(conn, sql, Jsonb, canonicalize, collection, recipe, build_ann):
         )
     """).format(sql.Identifier(table), sql.Literal(index), sql.Literal(config["dimensions"]),
                 sql.Identifier(table + "_unit_scope_fk")))
-    return index, table, profile
+    return IndexTarget(index, table, profile, True)
 
 
 def copy_rows(conn, query, rows):
@@ -278,15 +307,15 @@ def copy_batch(conn, sql, Jsonb, collection, recipes, indexes, batch):
         document_id = uuid.uuid4()
         documents.append((document_id, collection, external_id, Jsonb(metadata)))
         texts.extend((uuid.uuid4(), document_id, *source) for source in sources)
-        for position, (recipe, (index_id, _, _), vector) in enumerate(zip(recipes, indexes, vectors, strict=True)):
+        for position, (recipe, target, vector) in enumerate(zip(recipes, indexes, vectors, strict=True)):
             unit_id = uuid.uuid4()
-            units.append((unit_id, collection, index_id, document_id, 0, recipe["id"]))
-            vector_rows[position].append((unit_id, document_id, index_id, vector, "imported"))
+            units.append((unit_id, collection, target.id, document_id, 0, recipe["id"]))
+            vector_rows[position].append((unit_id, document_id, target.id, vector, "imported"))
     copy_rows(conn, "COPY dvp.documents (id,collection_id,external_id,metadata) FROM STDIN", documents)
     copy_rows(conn, "COPY dvp.source_texts (id,document_id,text_key,kind,language,content,content_hash) FROM STDIN", texts)
     copy_rows(conn, "COPY dvp.vector_units (id,collection_id,indexation_id,document_id,ordinal,embedding_key) FROM STDIN", units)
-    for (_, table, _), rows in zip(indexes, vector_rows, strict=True):
-        query = sql.SQL("COPY dvp.{} (unit_id,document_id,indexation_id,embedding,origin) FROM STDIN").format(sql.Identifier(table))
+    for target, rows in zip(indexes, vector_rows, strict=True):
+        query = sql.SQL("COPY dvp.{} (unit_id,document_id,indexation_id,embedding,origin) FROM STDIN").format(sql.Identifier(target.table))
         copy_rows(conn, query, rows)
 
 
@@ -318,21 +347,24 @@ def finish_indexes(conn, sql, collection, indexes, counts, build_ann):
                (SELECT count(*) FROM dvp.source_texts s JOIN dvp.documents d ON d.id=s.document_id WHERE d.collection_id=%s)
     """, (collection, collection)).fetchone()
     require((docs, texts) == (counts["documents"], counts["texts"]), "Conteos SQL de documentos o textos incorrectos")
-    for index, table, _ in indexes:
+    for target in indexes:
+        index, table = target.id, target.table
         relation = sql.Identifier("dvp", table)
-        vectors = conn.execute(sql.SQL("SELECT count(*) FROM {}").format(relation)).fetchone()[0]
+        vectors = conn.execute(sql.SQL("SELECT count(*) FROM {} v JOIN dvp.vector_units u ON u.id=v.unit_id AND u.document_id=v.document_id AND u.indexation_id=v.indexation_id WHERE u.collection_id=%s AND u.indexation_id=%s").format(relation), (collection, index)).fetchone()[0]
         units = conn.execute("SELECT count(*) FROM dvp.vector_units WHERE collection_id=%s AND indexation_id=%s",
                              (collection, index)).fetchone()[0]
         require(vectors == units == counts["vectorsPerRecipe"], "Conteo SQL de vectores o unidades incorrecto")
-        for suffix, columns in (("_doc", "document_id,unit_id"), ("_hash", "input_hash")):
-            conn.execute(sql.SQL("CREATE INDEX {} ON {} ({})").format(
-                sql.Identifier(table + suffix), relation, sql.SQL(columns)))
-        if build_ann:
-            conn.execute(sql.SQL("CREATE INDEX {} ON {} USING hnsw (embedding vector_cosine_ops)").format(
-                sql.Identifier(table + "_ann"), relation))
+        if target.created:
+            for suffix, columns in (("_doc", "document_id,unit_id"), ("_hash", "input_hash")):
+                conn.execute(sql.SQL("CREATE INDEX {} ON {} ({})").format(
+                    sql.Identifier(table + suffix), relation, sql.SQL(columns)))
+            if build_ann:
+                conn.execute(sql.SQL("CREATE INDEX {} ON {} USING hnsw (embedding vector_cosine_ops)").format(
+                    sql.Identifier(table + "_ann"), relation))
         conn.execute(sql.SQL("ANALYZE {}").format(relation))
-        conn.execute("UPDATE dvp.indexations SET state='ready',ann_state=%s WHERE id=%s",
-                     ("ready" if build_ann else "disabled", index))
+        if target.created:
+            conn.execute("UPDATE dvp.indexations SET state='ready',ann_state=%s WHERE id=%s",
+                         ("ready" if build_ann else "disabled", index))
 
 
 def apply(args, package, report):
@@ -360,8 +392,8 @@ def apply(args, package, report):
             write = lambda batch: copy_batch(conn, sql, Jsonb, collection, package.recipes, indexes, batch)
             report["counts"] = count_records(package, write, args.batch_size)
             finish_indexes(conn, sql, collection, indexes, report["counts"], build_ann)
-            for position, (item, (index, table, profile)) in enumerate(zip(report["indexations"], indexes, strict=True)):
-                item.update(id=str(index), profileId=str(profile), vectorTable=f"dvp.{table}", position=position)
+            for position, (item, target) in enumerate(zip(report["indexations"], indexes, strict=True)):
+                item.update(id=str(target.id), profileId=str(target.profile), vectorTable=f"dvp.{target.table}", position=position, reused=not target.created)
             report["status"] = "COMPLETE"
             report["finishedAt"] = timestamp()
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=f".{output.name}.",

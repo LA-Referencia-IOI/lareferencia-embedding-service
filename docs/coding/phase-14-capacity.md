@@ -1,5 +1,7 @@
 # Phase 14: measured capacity — synthetic smoke benchmark
 
+> **Historical implementation record:** This document describes an earlier implementation phase and may contain obsolete API routes, schemas, or behavior. For the current contract and examples, see the [Platform Guide](../PLATFORM-GUIDE.md), [Workflows](../WORKFLOWS.md), and [architecture](../lareferencia-embedding-service-architecture.md).
+
 Recorded 2026-11-12 with `DVP_BENCHMARK=1` and the isolated `docker-compose.test.yml` fixture. This is a **small single-client smoke measurement**, not a load test or production capacity claim.
 
 | Setting | Measured value |

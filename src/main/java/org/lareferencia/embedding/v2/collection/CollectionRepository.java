@@ -24,7 +24,7 @@ public class CollectionRepository {
     return read.query("""
         SELECT c.id,c.slug,c.name,c.created_at,
           (SELECT count(*) FROM dvp.documents d WHERE d.collection_id=c.id) AS documents,
-          (SELECT count(*) FROM dvp.indexations i WHERE i.collection_id=c.id) AS indexations
+          (SELECT count(*) FROM dvp.collection_indexations i WHERE i.collection_id=c.id) AS indexations
         FROM dvp.collections c WHERE c.id=?
         """,(rs,n)->new CollectionDetails(rs.getObject("id",UUID.class),rs.getString("slug"),rs.getString("name"),
             rs.getTimestamp("created_at").toInstant(),new CollectionDetails.Counts(rs.getLong("documents"),rs.getLong("indexations"))),id).stream().findFirst();

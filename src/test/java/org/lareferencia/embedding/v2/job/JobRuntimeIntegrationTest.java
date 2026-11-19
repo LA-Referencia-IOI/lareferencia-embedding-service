@@ -233,9 +233,9 @@ class JobRuntimeIntegrationTest {
         VALUES (?,?,'model','v1',3,'import_only','{}',?)
         """,profile,"profile-"+profile,profile.toString().replace("-","").repeat(2));
     jdbc.update("""
-        INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state)
-        VALUES (?,?,'idx',?,'{}','{}','cosine','none',?,'ready','disabled')
-        """,index,c,profile,"vec_"+index.toString().replace("-",""));
+        INSERT INTO dvp.indexations(id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state)
+        VALUES (?,'idx',?,'{}','{}','cosine','none',?,'ready','disabled')
+        """,index,profile,"vec_"+index.toString().replace("-",""));jdbc.update("INSERT INTO dvp.collection_indexations(indexation_id,collection_id) VALUES (?,?)",index,c);
     UUID jobId=UUID.randomUUID();
     jdbc.update("INSERT INTO dvp.jobs(id,collection_id,indexation_id,kind,status,parameters) VALUES (?,?,?,'generate','queued','{}')",
         jobId,c,index);

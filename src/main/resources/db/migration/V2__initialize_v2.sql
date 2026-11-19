@@ -53,7 +53,6 @@ CREATE TABLE dvp.embedding_profiles (
 
 CREATE TABLE dvp.indexations (
     id uuid PRIMARY KEY,
-    collection_id uuid NOT NULL REFERENCES dvp.collections(id),
     slug varchar(100) NOT NULL CHECK (slug ~ '^[a-z0-9][a-z0-9_-]*$'),
     profile_id uuid NOT NULL REFERENCES dvp.embedding_profiles(id),
     selection jsonb NOT NULL,
@@ -64,9 +63,16 @@ CREATE TABLE dvp.indexations (
     state varchar(20) NOT NULL CHECK (state IN ('provisioning', 'ready', 'failed')),
     ann_state varchar(20) NOT NULL CHECK (ann_state IN ('disabled', 'pending', 'building', 'ready', 'failed')),
     created_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (collection_id, slug),
-    UNIQUE (id, collection_id)
+    UNIQUE (slug)
 );
+
+-- An indexation and a collection are independent resources linked through this table.
+CREATE TABLE dvp.collection_indexations (
+    indexation_id uuid NOT NULL REFERENCES dvp.indexations(id),
+    collection_id uuid NOT NULL REFERENCES dvp.collections(id),
+    PRIMARY KEY (indexation_id, collection_id)
+);
+CREATE INDEX collection_indexations_collection ON dvp.collection_indexations(collection_id, indexation_id);
 
 CREATE TABLE dvp.vector_units (
     id uuid PRIMARY KEY,
@@ -80,7 +86,7 @@ CREATE TABLE dvp.vector_units (
     embedding_key varchar(200),
     prepared_text text,
     prepared_key varchar(100),
-    FOREIGN KEY (indexation_id, collection_id) REFERENCES dvp.indexations(id, collection_id),
+    FOREIGN KEY (indexation_id, collection_id) REFERENCES dvp.collection_indexations(indexation_id, collection_id),
     FOREIGN KEY (document_id, collection_id) REFERENCES dvp.documents(id, collection_id) ON DELETE CASCADE,
     CONSTRAINT vector_units_identity UNIQUE (id, document_id, indexation_id),
     CONSTRAINT vector_units_document_embedding_key UNIQUE (indexation_id, document_id, embedding_key),
@@ -96,10 +102,11 @@ CREATE INDEX units_indexation ON dvp.vector_units(indexation_id, id);
 
 CREATE TABLE dvp.jobs (
     id uuid PRIMARY KEY,
-    collection_id uuid NOT NULL REFERENCES dvp.collections(id),
+    collection_id uuid REFERENCES dvp.collections(id),
     indexation_id uuid REFERENCES dvp.indexations(id),
     parent_job_id uuid REFERENCES dvp.jobs(id),
     kind varchar(20) NOT NULL CHECK (kind IN ('import', 'prepare', 'generate', 'maintenance')),
+    CHECK (collection_id IS NOT NULL OR (kind='maintenance' AND indexation_id IS NOT NULL)),
     status varchar(30) NOT NULL CHECK (status IN
         ('queued', 'running', 'succeeded', 'completed_with_errors', 'failed')),
     parameters jsonb NOT NULL,

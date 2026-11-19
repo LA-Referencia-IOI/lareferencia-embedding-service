@@ -102,10 +102,16 @@ python scripts/python/import_metadata_embeddings.py "$META" "$VECTORS" \
 ```
 
 Usa un *slug* y una ruta de informe nuevos. El script carga cada documento
-y sus textos una vez, crea una indexación por receta del manifiesto y
+y sus textos una vez, crea o reutiliza una indexación por receta del manifiesto y
 confirma toda la carga en una transacción. Por defecto, las indexaciones
 usan búsqueda exacta por coseno. `--ann hnsw_vector` construye un índice
 aproximado cuando la dimensión lo permite.
+
+Each recipe uses a global indexation slug. If an existing ready indexation has
+the same profile and configuration, the importer attaches the new collection
+and reuses its vector table. A different profile or indexation configuration
+causes a conflict and rolls back the import. Reused HNSW indexes must be ready.
+The report records whether each indexation was reused.
 
 ## 4. Comprobar el resultado
 

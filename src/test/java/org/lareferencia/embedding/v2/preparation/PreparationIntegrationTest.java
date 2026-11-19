@@ -42,9 +42,9 @@ class PreparationIntegrationTest {
         VALUES (?,?,?,'v1',3,'http','test','{"version":"identity-v1","document_prefix":"passage: ","query_prefix":""}'::jsonb,?)
         """,p,"p-"+p,"test-model",(p.toString().replace("-","")).repeat(2));
     jdbc.update("""
-        INSERT INTO dvp.indexations(id,collection_id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state)
-        VALUES (?,?,?, ?,?::jsonb,?::jsonb,'cosine','none',?,'ready','disabled')
-        """,i,c,"index",p,selection,chunking,"vec_"+i.toString().replace("-",""));
+        INSERT INTO dvp.indexations(id,slug,profile_id,selection,chunking,metric,ann_strategy,vector_table,state,ann_state)
+        VALUES (?,?, ?,?::jsonb,?::jsonb,'cosine','none',?,'ready','disabled')
+        """,i,"index-"+i,p,selection,chunking,"vec_"+i.toString().replace("-",""));jdbc.update("INSERT INTO dvp.collection_indexations(indexation_id,collection_id) VALUES (?,?)",i,c);
     String table="vec_"+i.toString().replace("-","");
     jdbc.execute("CREATE TABLE dvp."+table+" (unit_id uuid PRIMARY KEY, document_id uuid NOT NULL, indexation_id uuid NOT NULL, "
         +"embedding vector(3) NOT NULL, input_hash char(64), origin varchar(10), origin_job_id uuid, "

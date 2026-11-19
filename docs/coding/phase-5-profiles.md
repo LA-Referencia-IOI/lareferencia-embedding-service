@@ -1,5 +1,7 @@
 # Phase 5: embedding profiles and provider registry
 
+> **Historical implementation record:** This document describes an earlier implementation phase and may contain obsolete API routes, schemas, or behavior. For the current contract and examples, see the [Platform Guide](../PLATFORM-GUIDE.md), [Workflows](../WORKFLOWS.md), and [architecture](../lareferencia-embedding-service-architecture.md).
+
 With `DVP_ENABLED=true`, `POST /api/v2/embedding-profiles` creates a profile, `GET /api/v2/embedding-profiles` lists profiles, and `GET /api/v2/embedding-profiles/{id}` retrieves one. POST requires an `Idempotency-Key`; the same key and request replay the original response and Location. There are no update or delete routes. Profile creation performs no inference and makes no provider request.
 
 ```bash

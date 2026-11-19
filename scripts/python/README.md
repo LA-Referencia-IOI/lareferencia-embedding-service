@@ -67,7 +67,7 @@ y permite relanzarla desde el comienzo.
 Este paquete es el formato de intercambio. Para enviarlo a la API de
 importación v2, se deben combinar las partes de metadata y vectores en los
 objetos que acepta el servicio. Consulta la
-[guía de importación](../../docs/phase-10-imports.md).
+[current import guide](../../docs/PLATFORM-GUIDE.md#9-streaming-imports).
 
 ## Importar metadata y vectores directamente a PostgreSQL v2
 
@@ -77,6 +77,10 @@ PostgreSQL con pgvector y el esquema `dvp` ya migrado por el servicio v2.
 Para la carga, la cuenta necesita permisos de lectura e inserción en las
 tablas de v2, permiso para actualizar el estado de las indexaciones,
 acceso a sus secuencias y permiso para crear tablas e índices en `dvp`. El script no instala extensiones ni ejecuta migraciones.
+
+To reuse an indexation created by another database role, the importer also
+needs `INSERT` privileges on its existing `dvp.vec_*` table and the appropriate
+privileges to analyze it. Use the current v2 schema initialized by the service.
 
 ```bash
 python -m pip install -r scripts/python/requirements-import.txt
@@ -117,18 +121,25 @@ python scripts/python/import_metadata_embeddings.py \
   el tipo a `abstract`. Se conserva el idioma explícito cuando existe.
   Las ocurrencias en blanco quedan en `data`. Las demás se escriben sin
   normalización y con las mismas claves y hashes que espera v2.
-- Cada posición de `embeddings` crea su propia indexación, identificada
-  por el ID de la receta, con coseno y sin fragmentación. Cada documento
-  tiene una unidad con `embedding_key` igual al ID de la receta por
-  indexación. Se importa un vector `float32` finito y no nulo por posición,
-  con la dimensión declarada. El perfil `import_only` se crea o se
-  reutiliza por el fingerprint que usa v2. La búsqueda requiere
-  `query.vector` del modelo y la receta de consulta correspondientes.
+- Each embedding recipe resolves a global indexation by its recipe ID. The
+  importer creates it when absent or attaches the new collection to an existing
+  ready indexation with the same profile, selection, chunking, cosine metric,
+  and ANN strategy. A conflicting configuration fails and rolls back the whole
+  import. HNSW indexations must already have a ready ANN index to be reused.
+  Each document has one unit per recipe with that recipe ID as `embedding_key`.
+  The `import_only` profile is reused by its v2 fingerprint; search accepts a
+  compatible query vector or a text query with a compatible HTTP query profile.
 - El informe conserva el UUID de colección, el perfil e indexación por
   receta, sus parámetros, los hashes de los manifiestos, el exportId, la
   variante, los snapshots y los conteos. Conserva ese informe junto con
   ambos manifiestos. La procedencia compartida queda fuera de la
   metadata repetida de los documentos.
+
+The report's `reused` field identifies indexations already present before this
+import. Existing vector tables and ANN indexes are retained; imported-vector
+counts are checked for the new collection. Test the importer only against a
+disposable PostgreSQL server using `DVP_PYTHON_TEST_DSN` and
+`python -m unittest discover -s scripts/python/tests -v`.
 
 La carga comprueba `records.sqlite` en modo lectura. Una discrepancia,
 un vector inválido o un error de PostgreSQL revierte la colección y las

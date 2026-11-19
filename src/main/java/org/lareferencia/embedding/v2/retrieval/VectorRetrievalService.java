@@ -21,9 +21,11 @@ public class VectorRetrievalService {
   private record Unit(UUID id,String vector) {}
 
   public Map<String,Object> get(String collection,String indexation,String document,boolean external,MultiValueMap<String,String> query) {
-    UUID c=uuid(collection), i=uuid(indexation), d=external?null:uuid(document);
-    Set<String> allowed=external?Set.of("external_id","limit","cursor"):Set.of("limit","cursor");
+    UUID i=uuid(indexation), d=external?null:uuid(document);
+    Set<String> allowed=external?Set.of("external_id","collection_id","limit","cursor"):Set.of("collection_id","limit","cursor");
     for(var entry:query.entrySet()) if(!allowed.contains(entry.getKey()) || entry.getValue().size()!=1) throw V2Exception.badRequest("Invalid query parameter");
+    if(collection!=null && query.containsKey("collection_id"))throw V2Exception.badRequest("Collection is already specified in the path");
+    UUID c=collection!=null?uuid(collection):query.containsKey("collection_id")?uuid(query.getFirst("collection_id")):null;
     String externalId=external?query.getFirst("external_id"):null;
     if(external && (externalId==null || externalId.isBlank() || externalId.length()>512)) throw V2Exception.badRequest("Invalid external_id");
     Integer limit=null;
@@ -43,17 +45,18 @@ public class VectorRetrievalService {
     return tx.execute(status->read(c,i,d,externalId,pageSize,afterUnit,scope));
   }
   private Map<String,Object> read(UUID collection,UUID indexation,UUID document,String external,Integer limit,UUID after,String scope) {
-    var docs=jdbc.query("SELECT id FROM dvp.documents WHERE collection_id=? AND "+(document==null?"external_id=?":"id=?"),
-      (rs,n)->rs.getObject(1,UUID.class),collection,document==null?external:document);
+    var docs=jdbc.query("SELECT d.id FROM dvp.documents d JOIN dvp.collection_indexations ci ON ci.collection_id=d.collection_id AND ci.indexation_id=? WHERE (?::uuid IS NULL OR d.collection_id=?) AND "+(document==null?"d.external_id=?":"d.id=?")+" LIMIT 2",
+      (rs,n)->rs.getObject(1,UUID.class),indexation,collection,collection,document==null?external:document);
     if(docs.isEmpty())throw new V2Exception(404,"not_found","Resource not found");
-    var configs=jdbc.query("SELECT i.id,p.model,i.vector_table,i.state FROM dvp.indexations i JOIN dvp.embedding_profiles p ON p.id=i.profile_id WHERE i.collection_id=? AND i.id=?",
-      (rs,n)->new Config(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3),rs.getString(4)),collection,indexation);
+    if(docs.size()>1)throw new V2Exception(409,"ambiguous_external_id","External ID exists in multiple collections; specify collection_id");
+    var configs=jdbc.query("SELECT i.id,p.model,i.vector_table,i.state FROM dvp.indexations i JOIN dvp.embedding_profiles p ON p.id=i.profile_id WHERE i.id=?",
+      (rs,n)->new Config(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3),rs.getString(4)),indexation);
     if(configs.isEmpty())throw new V2Exception(404,"not_found","Resource not found");
     Config config=configs.getFirst();
     if(!config.state().equals("ready"))throw new V2Exception(409,"indexation_unavailable","Index configuration is not ready");
     if(!config.table().equals("vec_"+config.id().toString().replace("-","")))throw new IllegalStateException("Invalid vector table identity");
-    String sql="SELECT u.id,v.embedding::text FROM dvp.vector_units u JOIN dvp."+config.table()+" v ON v.unit_id=u.id AND v.document_id=u.document_id AND v.indexation_id=u.indexation_id WHERE u.document_id=? AND u.collection_id=? AND u.indexation_id=?"+(after==null?"":" AND u.id>?")+" ORDER BY u.id"+(limit==null?"":" LIMIT ?");
-    List<Object> args=new ArrayList<>(List.of(docs.getFirst(),collection,indexation));
+    String sql="SELECT u.id,v.embedding::text FROM dvp.vector_units u JOIN dvp."+config.table()+" v ON v.unit_id=u.id AND v.document_id=u.document_id AND v.indexation_id=u.indexation_id WHERE u.document_id=? AND u.indexation_id=?"+(after==null?"":" AND u.id>?")+" ORDER BY u.id"+(limit==null?"":" LIMIT ?");
+    List<Object> args=new ArrayList<>(List.of(docs.getFirst(),indexation));
     if(after!=null)args.add(after);
     if(limit!=null)args.add(limit+1);
     var units=jdbc.query(sql,(rs,n)->new Unit(rs.getObject(1,UUID.class),rs.getString(2)),args.toArray());

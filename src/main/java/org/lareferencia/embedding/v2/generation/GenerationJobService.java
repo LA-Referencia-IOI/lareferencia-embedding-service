@@ -34,7 +34,7 @@ public class GenerationJobService {
     if(ids!=null) {var normalized=parameters.putArray("document_ids");unique.forEach(id->normalized.add(id.toString()));}
     String route="/api/v2/collections/"+c+"/indexations/"+i+"/generation-jobs";
     return idempotency.execute("POST "+route,key,canonical.requestHash(query,body),()->{
-      var state=write.query("SELECT i.state,p.execution_mode FROM dvp.indexations i JOIN dvp.embedding_profiles p ON p.id=i.profile_id WHERE i.id=? AND i.collection_id=?",(rs,n)->Map.entry(rs.getString(1),rs.getString(2)),i,c);
+      var state=write.query("SELECT i.state,p.execution_mode FROM dvp.indexations i JOIN dvp.embedding_profiles p ON p.id=i.profile_id WHERE i.id=? AND EXISTS (SELECT 1 FROM dvp.collection_indexations ci WHERE ci.indexation_id=i.id AND ci.collection_id=?)",(rs,n)->Map.entry(rs.getString(1),rs.getString(2)),i,c);
       if(state.isEmpty()) throw new V2Exception(404,"indexation_not_found","Index configuration does not exist in collection");
       if(!state.getFirst().getKey().equals("ready")) throw new V2Exception(409,"indexation_unavailable","Index configuration is not ready");
       if(!state.getFirst().getValue().equals("http")) throw new V2Exception(409,"profile_not_executable","Profile has no inference capability");
