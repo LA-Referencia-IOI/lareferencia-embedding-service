@@ -495,3 +495,13 @@ Case-insensitive store uniqueness and model lookup use PostgreSQL `lower(...)`
 consistently. A store from a different configured provider returns 409 before
 cache reads or inference; do not repoint an existing store at another vector
 space. No historical cache is converted into documents or automatically reindexed.
+
+### Browser access (CORS)
+
+The API permits the local UI origins `http://localhost:5173` and `http://127.0.0.1:5173` by default. For another frontend host or port, set `CORS_ALLOWED_ORIGINS` to a comma-separated list of exact origins, for example:
+
+```bash
+export CORS_ALLOWED_ORIGINS='https://ui.example.org,http://localhost:5173'
+```
+
+Restart the API after changing the configuration. CORS allows `Content-Type`, `Authorization`, `Idempotency-Key`, and `If-Match` request headers and exposes `ETag`, `Location`, `X-Request-Id`, and `Retry-After` to the browser. CORS is not authentication or authorization; enforce access controls in the API or gateway. Revert this configuration and deploy the previous version to roll back. No database migration or reindexing is required.
