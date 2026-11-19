@@ -118,6 +118,16 @@ class LegacyIntegrationTest {
   }
 
   @Test
+  void readOnlyCacheLookupDoesNotCreateMissingTableAndReturnsExistingVectors() {
+    UUID id = UUID.randomUUID();
+    String table = new StoreTableNamingService().tableName(id);
+    assertTrue(vectors.findByHashesIfExists(id, 3, List.of("abc")).isEmpty());
+    assertNull(jdbc.queryForObject("SELECT to_regclass(?)", String.class, "public." + table));
+    vectors.saveEmbeddings(id, 3, Map.of("abc", new float[] {1, 2, 3}));
+    assertArrayEquals(new float[] {1, 2, 3}, vectors.findByHashesIfExists(id, 3, List.of("abc")).get("abc"));
+  }
+
+  @Test
   void httpBatchOrderCacheAndProviderMismatchPreserveLegacyContract() throws Exception {
     String name = "http-" + UUID.randomUUID();
     var create =
@@ -135,8 +145,7 @@ class LegacyIntegrationTest {
                 "ollama",
                 new EmbeddingProviderService.UsageData(2, 2)));
     String payload =
-        mapper.writeValueAsString(
-            Map.of("model", name, "dimensions", 3, "input", List.of("First", "First", "Second")));
+        mapper.writeValueAsString(Map.of("model", name, "dimensions", 3, "input", List.of("First", "First", "Second")));
     for (int i = 0; i < 2; i++) {
       var result =
           mvc.perform(

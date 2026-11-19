@@ -720,7 +720,16 @@ Example response **200** (fields may be omitted here for brevity):
 
 ### `POST /api/v1/embeddings`
 
-Generates or reuses embeddings for a string or array of strings. The request identifies the store by `model` (the store name, matched case-insensitively) and `dimensions`; the store model is sent to the provider. The field name remains OpenAI-compatible, but its meaning changed: clients that previously sent a provider model must now send the store name if they differ. A mismatched configured provider returns 409.
+Generates or reuses embeddings for a string or array of strings. The request identifies the store by `model` (the store name, matched case-insensitively) and `dimensions`; the store model is sent to the provider. The field name remains OpenAI-compatible, but its meaning changed: clients that previously sent a provider model must now send the store name if they differ. A mismatched configured provider returns 409. `save` defaults to `true`; `save:false` reuses cached vectors and does not save newly generated vectors.
+
+For a vector that is not saved, send `"save": false`:
+
+```json
+{"model":"Example Store","dimensions":3,"input":"Example text","save":false}
+```
+
+When `save` is omitted or true, existing caching and persistence remain enabled. `save:false` reads an existing cache but does not save vectors or create a vector table. The store must exist and the configured provider and dimensions must match. No database migration is needed for this parameter.
+
 
 Request:
 

@@ -56,7 +56,7 @@ public class EmbeddingService {
         store.getName(),
         store.getModel(),
         inputs.size());
-    if (store.getEmbeddingDimension() != null) {
+    if (request.shouldSave() && store.getEmbeddingDimension() != null) {
       embeddingRepository.ensureStoreTableExists(store.getId(), store.getEmbeddingDimension(), false);
     }
 
@@ -64,8 +64,7 @@ public class EmbeddingService {
 
     List<String> hashes = normalizedInputs.stream().map(hashService::hash).toList();
 
-    Map<String, float[]> cachedEmbeddings =
-        embeddingRepository.findByHashes(store.getId(), store.getEmbeddingDimension(), new LinkedHashSet<>(hashes));
+    Map<String, float[]> cachedEmbeddings = lookupCache(store, new LinkedHashSet<>(hashes), request.shouldSave());
     GenerateEmbeddingsResponse.Usage usage = new GenerateEmbeddingsResponse.Usage(0, 0);
     List<float[]> results = new ArrayList<>(Collections.nCopies(inputs.size(), null));
     LinkedHashMap<String, String> missingByHash = new LinkedHashMap<>();
@@ -102,8 +101,7 @@ public class EmbeddingService {
             store.getId(),
             store.getModel(),
             missingByHash.size());
-        Map<String, float[]> cachedAfterLock =
-            embeddingRepository.findByHashes(store.getId(), store.getEmbeddingDimension(), missingByHash.keySet());
+        Map<String, float[]> cachedAfterLock = lookupCache(store, missingByHash.keySet(), request.shouldSave());
         LinkedHashMap<String, String> unresolvedByHash = new LinkedHashMap<>();
         Map<String, float[]> resolvedEmbeddings = new LinkedHashMap<>(cachedAfterLock);
 
@@ -139,7 +137,16 @@ public class EmbeddingService {
 
           int embeddingDimensions =
               validateAndResolveGeneratedDimensions(generatedEmbeddings, unresolvedByHash.size(), store);
-          embeddingDimensions = storeService.ensureEmbeddingDimensions(store, embeddingDimensions);
+          if (embeddingDimensions != request.dimensions()) {
+            throw new EmbeddingProviderException(
+                "Provider returned embedding dimensions "
+                    + embeddingDimensions
+                    + " but expected "
+                    + request.dimensions());
+          }
+          if (request.shouldSave()) {
+            embeddingDimensions = storeService.ensureEmbeddingDimensions(store, embeddingDimensions);
+          }
 
           LinkedHashMap<String, float[]> generatedByHash = new LinkedHashMap<>();
           int generatedIndex = 0;
@@ -147,12 +154,9 @@ public class EmbeddingService {
             generatedByHash.put(hash, generatedEmbeddings.get(generatedIndex++));
             generationCounter.increment();
           }
-          log.debug(
-              "Persisting generated embeddings storeId={} model={} generated={}",
-              store.getId(),
-              store.getModel(),
-              generatedByHash.size());
-          embeddingRepository.saveEmbeddings(store.getId(), embeddingDimensions, generatedByHash);
+          if (request.shouldSave()) {
+            embeddingRepository.saveEmbeddings(store.getId(), embeddingDimensions, generatedByHash);
+          }
           resolvedEmbeddings.putAll(generatedByHash);
         }
 
@@ -181,6 +185,12 @@ public class EmbeddingService {
 
     return new GenerateEmbeddingsResponse(
         store.getId(), store.getName(), store.getModel(), provider, "list", data, usage);
+  }
+
+  private Map<String, float[]> lookupCache(StoreEntity store, Collection<String> hashes, boolean save) {
+    return save
+        ? embeddingRepository.findByHashes(store.getId(), store.getEmbeddingDimension(), hashes)
+        : embeddingRepository.findByHashesIfExists(store.getId(), store.getEmbeddingDimension(), hashes);
   }
 
   private GenerateEmbeddingsResponse.Usage addUsage(

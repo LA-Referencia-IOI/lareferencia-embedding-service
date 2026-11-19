@@ -18,6 +18,12 @@ class GenerateEmbeddingsRequestTest {
             GenerateEmbeddingsRequest.class);
     assertEquals("embeddinggemma-2 v1", request.storeName());
     assertEquals(768, request.dimensions());
+    org.junit.jupiter.api.Assertions.assertTrue(request.shouldSave());
+    org.junit.jupiter.api.Assertions.assertFalse(
+        mapper
+            .readValue(
+                "{\"model\":\"a\",\"dimensions\":3,\"input\":\"x\",\"save\":false}", GenerateEmbeddingsRequest.class)
+            .shouldSave());
     assertEquals("example", request.inputs().getFirst());
     assertNull(
         mapper.readValue("{\"dimensions\":768,\"input\":\"example\"}", GenerateEmbeddingsRequest.class).storeName());

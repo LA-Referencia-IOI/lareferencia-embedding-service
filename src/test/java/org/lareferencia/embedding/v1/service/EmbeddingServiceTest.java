@@ -76,6 +76,71 @@ class EmbeddingServiceTest {
   }
 
   @Test
+  void saveFalseReusesCachedVectorsAndDoesNotSaveMisses() {
+    StoreEntity store = store(STORE_ID_1, "publications", "nomic-embed-text");
+    store.setEmbeddingDimension(3);
+    when(storeService.getRequiredStore("publications", 3)).thenReturn(store);
+    when(ollamaEmbeddingService.provider()).thenReturn("ollama");
+    String firstHash = hashService.hash(textNormalizer.normalize("First"));
+    when(embeddingRepository.findByHashesIfExists(eq(STORE_ID_1), eq(3), anyCollection()))
+        .thenReturn(Map.of(firstHash, new float[] {1, 2, 3}))
+        .thenReturn(Map.of());
+    when(ollamaEmbeddingService.embed(List.of("second"), "nomic-embed-text", 3))
+        .thenReturn(
+            new EmbeddingProviderService.EmbeddingBatchResult(
+                List.of(new float[] {4, 5, 6}), "ollama", new EmbeddingProviderService.UsageData(2, 2)));
+    var inputs =
+        new com.fasterxml.jackson.databind.ObjectMapper().createArrayNode().add("First").add("Second").add("Second");
+    var response = service.generateEmbeddings(new GenerateEmbeddingsRequest("publications", 3, inputs, false));
+    assertEquals(3, response.data().size());
+    assertEquals(List.of(1d, 2d, 3d), response.data().getFirst().embedding());
+    assertEquals(List.of(4d, 5d, 6d), response.data().get(1).embedding());
+    assertEquals(response.data().get(1).embedding(), response.data().get(2).embedding());
+    assertEquals(2, response.usage().totalTokens());
+    verify(embeddingRepository, never()).saveEmbeddings(eq(STORE_ID_1), eq(3), org.mockito.ArgumentMatchers.anyMap());
+    verify(embeddingRepository, never()).ensureStoreTableExists(eq(STORE_ID_1), eq(3), eq(false));
+    verify(storeService, never()).ensureEmbeddingDimensions(eq(store), eq(3));
+  }
+
+  @Test
+  void saveFalseReturnsFullyCachedBatchWithoutCallingProvider() {
+    StoreEntity store = store(STORE_ID_1, "publications", "nomic-embed-text");
+    store.setEmbeddingDimension(3);
+    when(storeService.getRequiredStore("publications", 3)).thenReturn(store);
+    when(ollamaEmbeddingService.provider()).thenReturn("ollama");
+    String hash = hashService.hash(textNormalizer.normalize("Example"));
+    when(embeddingRepository.findByHashesIfExists(eq(STORE_ID_1), eq(3), anyCollection()))
+        .thenReturn(Map.of(hash, new float[] {1, 2, 3}));
+    var response =
+        service.generateEmbeddings(new GenerateEmbeddingsRequest("publications", 3, new TextNode("Example"), false));
+    assertEquals(List.of(1d, 2d, 3d), response.data().getFirst().embedding());
+    verify(ollamaEmbeddingService, never())
+        .embed(
+            org.mockito.ArgumentMatchers.anyList(),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyInt());
+    verify(embeddingRepository, never()).saveEmbeddings(eq(STORE_ID_1), eq(3), org.mockito.ArgumentMatchers.anyMap());
+  }
+
+  @Test
+  void rejectsWrongDimensionsWhenSavingIsDisabled() {
+    StoreEntity store = store(STORE_ID_1, "publications", "nomic-embed-text");
+    store.setEmbeddingDimension(3);
+    when(storeService.getRequiredStore("publications", 3)).thenReturn(store);
+    when(ollamaEmbeddingService.provider()).thenReturn("ollama");
+    when(ollamaEmbeddingService.embed(List.of("example"), "nomic-embed-text", 3))
+        .thenReturn(
+            new EmbeddingProviderService.EmbeddingBatchResult(
+                List.of(new float[] {1, 2}), "ollama", new EmbeddingProviderService.UsageData(0, 0)));
+    assertThrows(
+        EmbeddingProviderException.class,
+        () ->
+            service.generateEmbeddings(
+                new GenerateEmbeddingsRequest("publications", 3, new TextNode("example"), false)));
+    verify(embeddingRepository, never()).saveEmbeddings(eq(STORE_ID_1), eq(3), org.mockito.ArgumentMatchers.anyMap());
+  }
+
+  @Test
   void generatesAndCachesMissingEmbeddings() {
     StoreEntity store = store(STORE_ID_1, "publications", "nomic-embed-text");
     store.setEmbeddingDimension(3);

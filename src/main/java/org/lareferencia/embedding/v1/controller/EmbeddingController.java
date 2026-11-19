@@ -25,7 +25,7 @@ public class EmbeddingController {
   @Operation(
       summary = "Generate embeddings",
       description =
-          "Generates embeddings for a single text or a batch of texts using the store registered for the requested name and dimensions. Cached vectors are returned when available.")
+          "Generates embeddings for a single text or a batch of texts using the store registered for the requested name and dimensions. By default cached vectors are reused and generated vectors are saved; save=false reuses cached vectors but does not save newly generated vectors.")
   @ApiResponses({
     @ApiResponse(responseCode = "200", description = "Embeddings generated or reused successfully"),
     @ApiResponse(responseCode = "400", description = "Invalid request payload"),

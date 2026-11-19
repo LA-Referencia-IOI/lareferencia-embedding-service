@@ -395,6 +395,7 @@ Response:
 
 Input behavior:
 
+- `save` defaults to `true`, which uses the existing cache and saves newly generated vectors. Set `save` to `false` to reuse cached vectors without saving newly generated vectors.
 - `input` must be a nonblank string or an array of nonblank strings.
 - `model` (the store name) and `dimensions` must match one registered store; names are matched case-insensitively.
 - Batch size is limited by `app.embedding.max-batch-size`.

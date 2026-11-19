@@ -71,6 +71,21 @@ public class EmbeddingRepository {
     }
 
     ensureStoreTableExists(storeId, embeddingDimensions, false);
+    return readByHashes(storeId, hashes);
+  }
+
+  public Map<String, float[]> findByHashesIfExists(
+      UUID storeId, Integer embeddingDimensions, Collection<String> hashes) {
+    if (hashes == null || hashes.isEmpty() || embeddingDimensions == null || embeddingDimensions <= 0) {
+      return Map.of();
+    }
+    String table = qualifiedTableName(storeId);
+    Boolean exists = jdbcTemplate.queryForObject("SELECT to_regclass(?) IS NOT NULL", Boolean.class, table);
+    if (!Boolean.TRUE.equals(exists)) return Map.of();
+    return readByHashes(storeId, hashes);
+  }
+
+  private Map<String, float[]> readByHashes(UUID storeId, Collection<String> hashes) {
     String qualifiedTableName = qualifiedTableName(storeId);
 
     List<String> orderedHashes = new ArrayList<>(hashes);

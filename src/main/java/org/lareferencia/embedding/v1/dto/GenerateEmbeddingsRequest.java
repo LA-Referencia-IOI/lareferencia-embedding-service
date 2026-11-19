@@ -17,7 +17,19 @@ public record GenerateEmbeddingsRequest(
         @Schema(description = "Store name; the store model is sent to the embedding provider")
         String storeName,
     @Positive(message = "Embedding dimensions must be a positive number") int dimensions,
-    @NotNull(message = "input is required") JsonNode input) {
+    @NotNull(message = "input is required") JsonNode input,
+    @Schema(
+            description = "Persist newly generated vectors; the existing cache is used in both modes; defaults to true",
+            defaultValue = "true")
+        Boolean save) {
+
+  public GenerateEmbeddingsRequest(String storeName, int dimensions, JsonNode input) {
+    this(storeName, dimensions, input, null);
+  }
+
+  public boolean shouldSave() {
+    return !Boolean.FALSE.equals(save);
+  }
 
   public List<String> inputs() {
     if (input == null) {
