@@ -17,4 +17,9 @@ public interface StoreRepository extends JpaRepository<StoreEntity, UUID> {
   List<StoreEntity> findByModelAndDimensions(String model, int dimensions);
 
   Optional<StoreEntity> findByName(String name);
+
+  @Query(
+      value = "SELECT * FROM stores WHERE lower(name) = lower(:name) AND embedding_dimension = :dimensions",
+      nativeQuery = true)
+  Optional<StoreEntity> findByNameAndDimensions(String name, int dimensions);
 }

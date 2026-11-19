@@ -15,7 +15,7 @@ class MigrationIntegrationTest {
   void freshDatabaseRunsBothMigrationsAndCanRestart() throws Exception {
     String url = TestDatabase.create();
     var flyway = Flyway.configure().dataSource(url, "postgres", "").load();
-    assertEquals(2, flyway.migrate().migrationsExecuted);
+    assertEquals(3, flyway.migrate().migrationsExecuted);
     assertEquals(0, flyway.migrate().migrationsExecuted);
     try (var c = DriverManager.getConnection(url, "postgres", "");
         var sql = c.createStatement();
@@ -35,7 +35,7 @@ class MigrationIntegrationTest {
     String url = legacyDatabase();
     assertThrows(FlywayException.class, () -> Flyway.configure().dataSource(url, "postgres", "").load().migrate());
     var upgrade = legacyUpgrade(url);
-    assertEquals(2, upgrade.migrate().migrationsExecuted);
+    assertEquals(3, upgrade.migrate().migrationsExecuted);
     assertEquals(0, Flyway.configure().dataSource(url, "postgres", "").load().migrate().migrationsExecuted);
     try (var c = DriverManager.getConnection(url, "postgres", "");
         var sql = c.createStatement();
@@ -51,6 +51,10 @@ class MigrationIntegrationTest {
       assertEquals("[1,2,3]", row.getString(2));
       assertNotNull(row.getString(3));
       assertNotNull(row.getString(4));
+    }
+    try (var c = DriverManager.getConnection(url, "postgres", "");
+        var sql = c.createStatement()) {
+      sql.execute("INSERT INTO public.stores VALUES (gen_random_uuid(),'Another','model','ollama',3,now())");
     }
   }
 
@@ -72,6 +76,28 @@ class MigrationIntegrationTest {
       assertEquals(2, row.getInt(1));
       assertNull(row.getString(2));
       assertNull(row.getString(3));
+    }
+  }
+
+  @Test
+  void upgradesExistingV2HistoryWithoutLosingV1Vectors() throws Exception {
+    String url = TestDatabase.create();
+    var before = Flyway.configure().dataSource(url, "postgres", "").target("2").load();
+    assertEquals(2, before.migrate().migrationsExecuted);
+    try (var c = DriverManager.getConnection(url, "postgres", "");
+        var sql = c.createStatement()) {
+      sql.execute("INSERT INTO public.stores VALUES (gen_random_uuid(),'Existing','same-model','ollama',3,now())");
+      sql.execute("CREATE TABLE public.embeddings_check (id text PRIMARY KEY, embedding vector(3))");
+      sql.execute("INSERT INTO public.embeddings_check VALUES ('hash','[1,2,3]')");
+    }
+    assertEquals(1, Flyway.configure().dataSource(url, "postgres", "").load().migrate().migrationsExecuted);
+    try (var c = DriverManager.getConnection(url, "postgres", "");
+        var sql = c.createStatement()) {
+      sql.execute("INSERT INTO public.stores VALUES (gen_random_uuid(),'Second','same-model','ollama',3,now())");
+      try (var row = sql.executeQuery("SELECT embedding::text FROM public.embeddings_check WHERE id='hash'")) {
+        assertTrue(row.next());
+        assertEquals("[1,2,3]", row.getString(1));
+      }
     }
   }
 

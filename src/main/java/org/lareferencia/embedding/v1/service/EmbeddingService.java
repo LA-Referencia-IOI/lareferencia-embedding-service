@@ -40,7 +40,7 @@ public class EmbeddingService {
 
   public GenerateEmbeddingsResponse generateEmbeddings(GenerateEmbeddingsRequest request) {
     List<String> inputs = validateAndExtractInputs(request);
-    StoreEntity store = storeService.getRequiredStore(request.model().trim(), request.dimensions());
+    StoreEntity store = storeService.getRequiredStore(request.storeName().trim(), request.dimensions());
     String provider = embeddingProviderService.provider();
     if (!provider.equals(store.getProvider())) {
       throw new org.lareferencia.embedding.v1.exception.StoreProviderMismatchException();
@@ -223,8 +223,8 @@ public class EmbeddingService {
   }
 
   private List<String> validateAndExtractInputs(GenerateEmbeddingsRequest request) {
-    if (request.model() == null || request.model().isBlank()) {
-      throw new InvalidRequestException("model must be provided");
+    if (request.storeName() == null || request.storeName().isBlank()) {
+      throw new InvalidRequestException("model (store name) must be provided");
     }
     if (request.dimensions() <= 0) {
       throw new InvalidRequestException("dimensions must be a positive number");

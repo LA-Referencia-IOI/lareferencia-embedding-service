@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/embeddings")
 @RequiredArgsConstructor
-@Tag(name = "v1 Embeddings", description = "Generate embeddings with model and dimensions aware persistent caching")
+@Tag(name = "v1 Embeddings", description = "Generate embeddings with store-scoped persistent caching")
 public class EmbeddingController {
 
   private final EmbeddingService embeddingService;
@@ -25,7 +25,7 @@ public class EmbeddingController {
   @Operation(
       summary = "Generate embeddings",
       description =
-          "Generates embeddings for a single text or a batch of texts using the store registered for the requested model and dimensions. Cached vectors are returned when available.")
+          "Generates embeddings for a single text or a batch of texts using the store registered for the requested name and dimensions. Cached vectors are returned when available.")
   @ApiResponses({
     @ApiResponse(responseCode = "200", description = "Embeddings generated or reused successfully"),
     @ApiResponse(responseCode = "400", description = "Invalid request payload"),

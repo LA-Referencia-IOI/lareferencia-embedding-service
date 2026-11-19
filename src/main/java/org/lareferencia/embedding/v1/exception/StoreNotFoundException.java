@@ -6,7 +6,7 @@ public class StoreNotFoundException extends RuntimeException {
     super("Embedding store '" + storeName + "' was not found");
   }
 
-  public StoreNotFoundException(String model, int dimensions) {
-    super("Embedding store for model '" + model + "' and dimensions " + dimensions + " was not found");
+  public StoreNotFoundException(String storeName, int dimensions) {
+    super("Embedding store named '" + storeName + "' and dimensions " + dimensions + " was not found");
   }
 }

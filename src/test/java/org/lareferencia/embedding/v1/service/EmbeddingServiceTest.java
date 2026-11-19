@@ -82,7 +82,7 @@ class EmbeddingServiceTest {
     String normalizedText = textNormalizer.normalize("Machine learning applied to repositories");
     String hash = hashService.hash(normalizedText);
 
-    when(storeService.getRequiredStore("nomic-embed-text", 3)).thenReturn(store);
+    when(storeService.getRequiredStore("publications", 3)).thenReturn(store);
     when(storeService.ensureEmbeddingDimensions(store, 3)).thenReturn(3);
     when(embeddingRepository.findByHashes(eq(STORE_ID_1), eq(3), anyCollection()))
         .thenReturn(Map.of())
@@ -94,8 +94,7 @@ class EmbeddingServiceTest {
     when(ollamaEmbeddingService.provider()).thenReturn("ollama");
     GenerateEmbeddingsResponse response =
         service.generateEmbeddings(
-            new GenerateEmbeddingsRequest(
-                "nomic-embed-text", 3, new TextNode("Machine learning applied to repositories")));
+            new GenerateEmbeddingsRequest("publications", 3, new TextNode("Machine learning applied to repositories")));
 
     assertNotNull(response);
     assertEquals(STORE_ID_1, response.storeId());

@@ -28,9 +28,6 @@ public class StoreService {
     if (storeRepository.nameExists(name)) {
       throw new StoreAlreadyExistsException(name);
     }
-    if (!storeRepository.findByModelAndDimensions(model, request.dimensions()).isEmpty()) {
-      throw new StoreAlreadyExistsException(model, request.dimensions());
-    }
     // Database uniqueness, not this preflight, serializes competing creations.
     StoreEntity store =
         storeRepository.saveAndFlush(
@@ -75,15 +72,10 @@ public class StoreService {
     return storeRepository.findByName(name).orElseThrow(() -> new StoreNotFoundException(name));
   }
 
-  public StoreEntity getRequiredStore(String model, int dimensions) {
-    List<StoreEntity> matches = storeRepository.findByModelAndDimensions(model, dimensions);
-    if (matches.isEmpty()) {
-      throw new StoreNotFoundException(model, dimensions);
-    }
-    if (matches.size() > 1) {
-      throw new InvalidRequestException("Multiple embedding stores found for model and dimensions");
-    }
-    return matches.getFirst();
+  public StoreEntity getRequiredStore(String name, int dimensions) {
+    return storeRepository
+        .findByNameAndDimensions(name, dimensions)
+        .orElseThrow(() -> new StoreNotFoundException(name, dimensions));
   }
 
   private StoreResponse toResponse(StoreEntity store) {

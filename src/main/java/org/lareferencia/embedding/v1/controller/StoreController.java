@@ -29,11 +29,11 @@ public class StoreController {
   @Operation(
       summary = "Create store",
       description =
-          "Creates a new embedding store for a model and dimensions pair, then initializes the dedicated pgvector table.")
+          "Creates a new embedding store with a name, model and dimensions, then initializes the dedicated pgvector table.")
   @ApiResponses({
     @ApiResponse(responseCode = "201", description = "Store created successfully"),
     @ApiResponse(responseCode = "400", description = "Invalid payload"),
-    @ApiResponse(responseCode = "409", description = "Store name or model and dimensions pair already exists"),
+    @ApiResponse(responseCode = "409", description = "Store name already exists"),
     @ApiResponse(responseCode = "502", description = "Embedding provider failure")
   })
   @PostMapping

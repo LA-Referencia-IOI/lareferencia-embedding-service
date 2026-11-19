@@ -228,7 +228,7 @@ Notes:
 
 - Store names are checked case-insensitively for duplicates at creation time.
 - The same provider model can be reused with different dimensions.
-- The same provider model and dimensions pair cannot be registered twice.
+- Different store names can use the same provider model and dimensions; each store has its own cache.
 - If `createVectorIndex` is `true` and the configured index type is `HNSW`,
   the service skips the vector index for dimensions above 2000 because pgvector
   does not support HNSW indexes above that limit.
@@ -348,14 +348,13 @@ Example response:
 POST /api/v1/embeddings
 ```
 
-The request `model` field is the provider model name. The service uses
-`model` + `dimensions` to find the registered store and its dedicated cache table.
+The request uses `model` (the store name) and `dimensions` to find the registered store and its dedicated cache table. The configured store model is sent to the provider.
 
 Single input:
 
 ```json
 {
-  "model": "bge-m3",
+  "model": "bge-m3-1024",
   "dimensions": 1024,
   "input": "Este es un texto academico"
 }
@@ -365,7 +364,7 @@ Batch input:
 
 ```json
 {
-  "model": "bge-m3",
+  "model": "bge-m3-1024",
   "dimensions": 1024,
   "input": ["Texto 1", "Texto 2"]
 }
@@ -397,7 +396,7 @@ Response:
 Input behavior:
 
 - `input` must be a nonblank string or an array of nonblank strings.
-- `model` and `dimensions` must match one registered store.
+- `model` (the store name) and `dimensions` must match one registered store; names are matched case-insensitively.
 - Batch size is limited by `app.embedding.max-batch-size`.
 - Each input length is limited by `app.embedding.max-input-length`.
 - Text normalization trims, joins hyphenated line breaks, lowercases, replaces
@@ -419,8 +418,8 @@ Common statuses:
 
 - `400 Bad Request`: invalid JSON, validation error, blank input, oversized
   batch, oversized input, or dimensions mismatch.
-- `404 Not Found`: no store was found for the requested model and dimensions.
-- `409 Conflict`: duplicate store name/model and dimensions, or a store whose persisted provider differs from the configured provider.
+- `404 Not Found`: no store was found for the requested store name and dimensions.
+- `409 Conflict`: duplicate store name, or a store whose persisted provider differs from the configured provider.
 - `502 Bad Gateway`: upstream embedding provider failure.
 - `500 Internal Server Error`: unexpected application error.
 
@@ -486,22 +485,26 @@ curl -X POST http://localhost:8989/api/v2/collections \
 Use a new key for a different create request. Reusing the same key with the same
 body replays the original response; reusing it with different content returns 409.
 
-For the two-migration bootstrap, instructions for upgrading from v1, and
+For the migration bootstrap, instructions for upgrading from v1, and
 compatibility with older v2 development databases, see
 [Install v2 or upgrade from v1](docs/PLATFORM-GUIDE.md#install-v2-or-upgrade-from-v1).
 
 The v1 store identity and xxHash/text-normalization behavior are preserved.
-Case-insensitive store uniqueness and model lookup use PostgreSQL `lower(...)`
+Case-insensitive store uniqueness and name lookup use PostgreSQL `lower(...)`
 consistently. A store from a different configured provider returns 409 before
 cache reads or inference; do not repoint an existing store at another vector
 space. No historical cache is converted into documents or automatically reindexed.
 
 ### Browser access (CORS)
 
-The API permits the local UI origins `http://localhost:5173` and `http://127.0.0.1:5173` by default. For another frontend host or port, set `CORS_ALLOWED_ORIGINS` to a comma-separated list of exact origins, for example:
+The API permits local UI origins on ports 8990 and 5173 (`localhost` and `127.0.0.1`) by default. For another frontend host or port, set `CORS_ALLOWED_ORIGINS` to a comma-separated list of exact origins, for example:
 
 ```bash
-export CORS_ALLOWED_ORIGINS='https://ui.example.org,http://localhost:5173'
+export CORS_ALLOWED_ORIGINS='https://ui.example.org,http://localhost:8990'
 ```
 
 Restart the API after changing the configuration. CORS allows `Content-Type`, `Authorization`, `Idempotency-Key`, and `If-Match` request headers and exposes `ETag`, `Location`, `X-Request-Id`, and `Retry-After` to the browser. CORS is not authentication or authorization; enforce access controls in the API or gateway. Revert this configuration and deploy the previous version to roll back. No database migration or reindexing is required.
+
+### v1 store-name lookup upgrade
+
+Migration `V3__v1_allow_shared_model_dimensions.sql` removes the model/dimension uniqueness constraints without deleting store tables or cached vectors. The `model` field of `POST /api/v1/embeddings` now identifies the store by name, rather than its provider model. Existing clients must update its value whenever the store name differs from the model; this is a semantic compatibility change. Existing store names remain case-insensitively unique. Reindexing is not required. Different store names create separate caches, but using the same provider model name does not itself select different fine-tuned weights: the provider must expose distinct model identifiers for distinct weights. To roll back, first resolve any duplicate model/dimension pairs, restore the old uniqueness constraint and index, and deploy the prior API and clients.

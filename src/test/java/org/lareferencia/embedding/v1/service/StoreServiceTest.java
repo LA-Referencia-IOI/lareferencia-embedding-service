@@ -57,25 +57,22 @@ class StoreServiceTest {
   }
 
   @Test
-  void rejectsDuplicateModelAndDimensions() {
-    when(repository.findByModelAndDimensions("model", 3)).thenReturn(List.of(store(3)));
-    assertThrows(
-        StoreAlreadyExistsException.class,
-        () -> service.createStore(new CreateStoreRequest("other", "model", 3, false)));
-  }
-
-  @Test
-  void findsStoresFromDatabaseOnEveryLookup() {
+  void permitsSameModelAndDimensionsForDifferentNames() {
     var saved = store(3);
-    when(repository.findByModelAndDimensions("model", 3)).thenReturn(List.of(), List.of(saved));
-    assertThrows(StoreNotFoundException.class, () -> service.getRequiredStore("model", 3));
-    assertEquals(saved, service.getRequiredStore("model", 3));
+    when(provider.provider()).thenReturn("ollama");
+    when(repository.saveAndFlush(any())).thenReturn(saved);
+    service.createStore(new CreateStoreRequest("other", "model", 3, false));
+    verify(repository).saveAndFlush(any());
   }
 
   @Test
-  void rejectsAmbiguousLegacyModelAndDimensions() {
-    when(repository.findByModelAndDimensions("model", 3)).thenReturn(List.of(store(3), store(3)));
-    assertThrows(InvalidRequestException.class, () -> service.getRequiredStore("model", 3));
+  void findsStoresByNameAndDimensions() {
+    var saved = store(3);
+    when(repository.findByNameAndDimensions("publications", 3))
+        .thenReturn(java.util.Optional.empty(), java.util.Optional.of(saved));
+    assertThrows(StoreNotFoundException.class, () -> service.getRequiredStore("publications", 3));
+    assertEquals(saved, service.getRequiredStore("publications", 3));
+    assertThrows(StoreNotFoundException.class, () -> service.getRequiredStore("publications", 4));
   }
 
   @Test

@@ -21,26 +21,29 @@ class CorsConfigTest {
 
   private final org.springframework.test.web.servlet.MockMvc mvc =
       MockMvcBuilders.standaloneSetup(new ExampleController())
-          .addFilters(new CorsConfig().corsFilter("http://localhost:5173,http://127.0.0.1:5173").getFilter())
+          .addFilters(
+              new CorsConfig()
+                  .corsFilter("http://localhost:8990,http://127.0.0.1:8990,http://localhost:5173,http://127.0.0.1:5173")
+                  .getFilter())
           .build();
 
   @Test
   void permitsPreflightForRevisionAndIdempotencyHeaders() throws Exception {
     mvc.perform(
             options("/api/v2/example")
-                .header("Origin", "http://localhost:5173")
+                .header("Origin", "http://localhost:8990")
                 .header("Access-Control-Request-Method", "PATCH")
                 .header("Access-Control-Request-Headers", "content-type,if-match,idempotency-key"))
         .andExpect(status().isOk())
-        .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"))
+        .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:8990"))
         .andExpect(header().exists("Access-Control-Allow-Headers"));
   }
 
   @Test
   void exposesRevisionAndLocationHeaders() throws Exception {
-    mvc.perform(get("/api/v2/example").header("Origin", "http://localhost:5173"))
+    mvc.perform(get("/api/v2/example").header("Origin", "http://localhost:8990"))
         .andExpect(status().isOk())
-        .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"))
+        .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:8990"))
         .andExpect(header().string("Access-Control-Expose-Headers", "ETag, Location, X-Request-Id, Retry-After"));
   }
 

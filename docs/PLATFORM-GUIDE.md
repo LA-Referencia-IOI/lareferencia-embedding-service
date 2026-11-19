@@ -674,7 +674,7 @@ Initial per-instance limits are two exact and 16 approximate searches, with 60- 
 
 ## 13. API v1
 
-V1 stores bind model and dimensions to a persistent cache. The service normalizes/hashes input, reuses cached vectors, and calls its configured provider for misses. The examples use a hypothetical three-dimensional model; use a provider and model that actually support its dimensions.
+V1 stores bind a unique name, model and dimensions to a persistent cache; the same model and dimensions may be used by different stores. The service normalizes/hashes input, reuses cached vectors, and calls its configured provider for misses. The examples use a hypothetical three-dimensional model; use a provider and model that actually support its dimensions.
 
 ### `POST /api/v1/stores`
 
@@ -692,6 +692,15 @@ Example response **201** (fields may be omitted here for brevity):
 ```json
 {"id":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","name":"Example Store","model":"example-model","provider":"ollama","embeddingDimensions":3,"createdAt":"2026-11-12T12:00:00Z"}
 ```
+
+Two stores may use the same provider model and dimensions while keeping separate caches:
+
+```json
+{"name":"embeddinggemma-2 v1","model":"embeddinggemma-2:270m","dimensions":768}
+{"name":"embeddinggemma-2 v2","model":"embeddinggemma-2:270m","dimensions":768}
+```
+
+The store name is unique case-insensitively. The provider receives the model configured on the selected store. Separate stores do not select different model weights by themselves: fine-tuned versions must be exposed by the provider under the appropriate model identifiers.
 
 ### `GET /api/v1/stores`
 
@@ -711,13 +720,13 @@ Example response **200** (fields may be omitted here for brevity):
 
 ### `POST /api/v1/embeddings`
 
-Generates or reuses embeddings for a string or array of strings. A mismatched configured provider returns 409.
+Generates or reuses embeddings for a string or array of strings. The request identifies the store by `model` (the store name, matched case-insensitively) and `dimensions`; the store model is sent to the provider. The field name remains OpenAI-compatible, but its meaning changed: clients that previously sent a provider model must now send the store name if they differ. A mismatched configured provider returns 409.
 
 Request:
 
 ```bash
 curl -X POST "$BASE/api/v1/embeddings" -H 'Content-Type: application/json' \
-  -d '{"model":"example-model","dimensions":3,"input":"Example text"}'
+  -d '{"model":"Example Store","dimensions":3,"input":"Example text"}'
 ```
 
 Example response **200** (fields may be omitted here for brevity):
@@ -795,10 +804,10 @@ For application rollback, disable v2 traffic and workers, safely stop uploads, a
 
 ### Install v2 or upgrade from v1
 
-For this release, create a new empty database before running the two Flyway migrations. The v2 initialization migration was changed for shared indexations; an existing v2 database must not be reused without a separately designed migration and backup. Rollback requires restoring the previous compatible database and application. The v2 distribution ships two Flyway migrations. `V1__initialize_v1.sql` creates or verifies the v1 store registry and its case-insensitive indexes. `V2__initialize_v2.sql` creates the final v2 registry. The application provisions vector tables as needed. PostgreSQL must already have pgvector enabled in the target database. Keep Hibernate in `validate` mode.
+For this release, create a new empty database before running the Flyway migrations. The v2 initialization migration was changed for shared indexations; an existing v2 database must not be reused without a separately designed migration and backup. Rollback requires restoring the previous compatible database and application. The distribution includes V1 and V2 bootstrap migrations and V3 for the v1 store lookup change. `V1__initialize_v1.sql` creates or verifies the v1 store registry and its case-insensitive indexes. `V2__initialize_v2.sql` creates the final v2 registry. The application provisions vector tables as needed. PostgreSQL must already have pgvector enabled in the target database. Keep Hibernate in `validate` mode.
 
 - **New database.** Start with `SPRING_FLYWAY_BASELINE_ON_MIGRATE=false`. Flyway applies V1 on startup. Set `DVP_ENABLED=true` to expose the v2 API and configure the worker and import flags for the workflows you use.
-- **v1 database without Flyway history.** Verify that `public.stores` matches the v1 schema and that neither `public.flyway_schema_history` nor `dvp` exists. Back up the database, stop v1 writers and rehearse on a copy. Enable baselining **at version 0** for the first v2 startup. This lets Flyway run V1 and V2, which preserve stores and their vector tables. If case-insensitive store names or model/dimension pairs conflict, resolve them before retrying. After a successful startup, disable automatic baselining again.
+- **v1 database without Flyway history.** Verify that `public.stores` matches the v1 schema and that neither `public.flyway_schema_history` nor `dvp` exists. Back up the database, stop v1 writers and rehearse on a copy. Enable baselining **at version 0** for the first v2 startup. This lets Flyway run V1, V2 and V3, which preserve stores and their vector tables. If case-insensitive store names or model/dimension pairs conflict, resolve them before retrying. After a successful startup, disable automatic baselining again.
 - **Database initialized by a development version of v2.** Its Flyway history belongs to the old migration chain. Use a new database for this release and reimport any required data. For a database that must retain its old v2 state, keep the matching build and plan a separate migration. Deleting Flyway history, changing checksums, or baselining at V1 does not perform that upgrade.
 
 For a verified v1 database, the first Maven startup can use the following environment overrides. Supply the existing database connection in your local configuration. With Docker Compose, use the same baseline variables and select the verified database through `DB_URL`, `DB_USER`, and `DB_PASSWORD`.
@@ -808,7 +817,7 @@ SPRING_FLYWAY_BASELINE_ON_MIGRATE=true SPRING_FLYWAY_BASELINE_VERSION=0 \
   ./mvnw spring-boot:run
 ```
 
-Check that Flyway records successful version `1` and `2` migrations with descriptions `initialize v1` and `initialize v2`. A v1 upgrade also records a version `0` baseline. Verify v1 store reads and, with v2 enabled, list collections before running the [workflows](WORKFLOWS.md). Existing v1 vectors require no reindex. For rollback, stop v2 writes and workers before restoring the pre-upgrade backup and restarting v1.
+Check that Flyway records successful version `1`, `2`, and `3` migrations with descriptions `initialize v1`, `initialize v2`, and `v1 allow shared model dimensions`. A v1 upgrade also records a version `0` baseline. Verify v1 store reads and, with v2 enabled, list collections before running the [workflows](WORKFLOWS.md). Existing v1 vectors require no reindex. For rollback, stop v2 writes and workers before restoring the pre-upgrade backup and restarting v1.
 
 ### Measured capacity and limitations
 

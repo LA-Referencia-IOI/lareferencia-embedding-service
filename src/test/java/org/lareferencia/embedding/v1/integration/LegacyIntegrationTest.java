@@ -92,6 +92,19 @@ class LegacyIntegrationTest {
   }
 
   @Test
+  void sameModelAndDimensionsCanBeUsedByDifferentStores() {
+    String suffix = UUID.randomUUID().toString();
+    String model = "model-" + suffix;
+    var first = stores.createStore(new CreateStoreRequest("one-" + suffix, model, 3, false));
+    var second = stores.createStore(new CreateStoreRequest("two-" + suffix, model, 3, false));
+    assertNotEquals(first.id(), second.id());
+    assertEquals(first.id(), stores.getRequiredStore(("one-" + suffix).toUpperCase(Locale.ROOT), 3).getId());
+    assertEquals(second.id(), stores.getRequiredStore("two-" + suffix, 3).getId());
+    vectors.saveEmbeddings(first.id(), 3, Map.of("same", new float[] {1, 2, 3}));
+    assertTrue(vectors.findByHashes(second.id(), 3, List.of("same")).isEmpty());
+  }
+
+  @Test
   void vectorsKeepTheirValuesAndDynamicTableMarkersAreNotPublishedOnRollback() {
     UUID id = UUID.randomUUID();
     var tx = new TransactionTemplate(transactionManager);
@@ -122,7 +135,8 @@ class LegacyIntegrationTest {
                 "ollama",
                 new EmbeddingProviderService.UsageData(2, 2)));
     String payload =
-        mapper.writeValueAsString(Map.of("model", name, "dimensions", 3, "input", List.of("First", "First", "Second")));
+        mapper.writeValueAsString(
+            Map.of("model", name, "dimensions", 3, "input", List.of("First", "First", "Second")));
     for (int i = 0; i < 2; i++) {
       var result =
           mvc.perform(
