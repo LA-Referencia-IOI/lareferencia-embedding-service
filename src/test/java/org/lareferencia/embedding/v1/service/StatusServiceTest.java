@@ -7,7 +7,6 @@ import static org.mockito.Mockito.when;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-
 import org.junit.jupiter.api.Test;
 import org.lareferencia.embedding.v1.config.PgVectorStoreProperties;
 import org.lareferencia.embedding.v1.dto.StatusResponse;
@@ -26,27 +25,25 @@ class StatusServiceTest {
     StoreRepository storeRepository = Mockito.mock(StoreRepository.class);
     StoreTableNamingService tableNamingService = new StoreTableNamingService();
     PgVectorStoreProperties properties = new PgVectorStoreProperties();
-    StoreEntity store = StoreEntity.builder()
-        .id(STORE_ID)
-        .name("publications")
-        .model("bge-m3")
-        .provider("ollama")
-        .embeddingDimension(1024)
-        .createdAt(Instant.now())
-        .build();
+    StoreEntity store =
+        StoreEntity.builder()
+            .id(STORE_ID)
+            .name("publications")
+            .model("bge-m3")
+            .provider("ollama")
+            .embeddingDimension(1024)
+            .createdAt(Instant.now())
+            .build();
 
     when(storeRepository.findAll()).thenReturn(List.of(store));
     when(statusRepository.currentDatabaseName()).thenReturn("embeddings");
     when(statusRepository.currentDatabaseSizeBytes()).thenReturn(4096L);
     when(statusRepository.storeCount()).thenReturn(1L);
-    when(statusRepository.embeddingTableStats("public")).thenReturn(List.of(
-        new StatusRepository.EmbeddingTableStats(
-            "public",
-            tableNamingService.tableName(STORE_ID),
-            2048L,
-            1024L,
-            3072L,
-            12L)));
+    when(statusRepository.embeddingTableStats("public"))
+        .thenReturn(
+            List.of(
+                new StatusRepository.EmbeddingTableStats(
+                    "public", tableNamingService.tableName(STORE_ID), 2048L, 1024L, 3072L, 12L)));
 
     StatusService statusService = new StatusService(statusRepository, storeRepository, tableNamingService, properties);
 
@@ -70,8 +67,11 @@ class StatusServiceTest {
   void byteFormattingIsStableAcrossLocales() {
     java.util.Locale original = java.util.Locale.getDefault();
     try {
-      for (java.util.Locale locale : java.util.List.of(java.util.Locale.US,
-          java.util.Locale.forLanguageTag("es-ES"), java.util.Locale.forLanguageTag("pt-BR"))) {
+      for (java.util.Locale locale :
+          java.util.List.of(
+              java.util.Locale.US,
+              java.util.Locale.forLanguageTag("es-ES"),
+              java.util.Locale.forLanguageTag("pt-BR"))) {
         java.util.Locale.setDefault(locale);
         combinesSystemAndDatabaseStatus();
       }

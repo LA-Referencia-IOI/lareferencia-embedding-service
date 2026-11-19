@@ -8,5 +8,15 @@ import java.util.UUID;
 
 /** Public job metadata; internal lease owner, raw errors and private file paths are excluded. */
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-public record JobResource(UUID id,String kind,String status,UUID collectionId,UUID indexationId,UUID parentJobId,
-    JsonNode parameters,JsonNode counters,Instant createdAt,Instant finishedAt,String globalErrorCode) { }
+public record JobResource(
+    UUID id,
+    String kind,
+    String status,
+    UUID collectionId,
+    UUID indexationId,
+    UUID parentJobId,
+    JsonNode parameters,
+    JsonNode counters,
+    Instant createdAt,
+    Instant finishedAt,
+    String globalErrorCode) {}

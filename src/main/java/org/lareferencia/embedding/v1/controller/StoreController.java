@@ -1,9 +1,12 @@
 package org.lareferencia.embedding.v1.controller;
 
-import java.util.List;
-
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-
+import java.util.List;
+import lombok.RequiredArgsConstructor;
 import org.lareferencia.embedding.v1.dto.CreateStoreRequest;
 import org.lareferencia.embedding.v1.dto.StoreResponse;
 import org.lareferencia.embedding.v1.service.StoreService;
@@ -15,12 +18,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import io.swagger.v3.oas.annotations.responses.ApiResponses;
-import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
-
 @RestController
 @RequestMapping("/api/v1/stores")
 @RequiredArgsConstructor
@@ -29,12 +26,15 @@ public class StoreController {
 
   private final StoreService storeService;
 
-  @Operation(summary = "Create store", description = "Creates a new embedding store for a model and dimensions pair, then initializes the dedicated pgvector table.")
+  @Operation(
+      summary = "Create store",
+      description =
+          "Creates a new embedding store for a model and dimensions pair, then initializes the dedicated pgvector table.")
   @ApiResponses({
-      @ApiResponse(responseCode = "201", description = "Store created successfully"),
-      @ApiResponse(responseCode = "400", description = "Invalid payload"),
-      @ApiResponse(responseCode = "409", description = "Store name or model and dimensions pair already exists"),
-      @ApiResponse(responseCode = "502", description = "Embedding provider failure")
+    @ApiResponse(responseCode = "201", description = "Store created successfully"),
+    @ApiResponse(responseCode = "400", description = "Invalid payload"),
+    @ApiResponse(responseCode = "409", description = "Store name or model and dimensions pair already exists"),
+    @ApiResponse(responseCode = "502", description = "Embedding provider failure")
   })
   @PostMapping
   @ResponseStatus(HttpStatus.CREATED)

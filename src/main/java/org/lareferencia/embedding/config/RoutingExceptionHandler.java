@@ -21,9 +21,16 @@ public class RoutingExceptionHandler {
   public ResponseEntity<?> missing(NoResourceFoundException error, HttpServletRequest request) {
     Object requestId = request.getAttribute(V2RequestFilter.REQUEST_ID);
     if (requestId != null) {
-      return ResponseEntity.status(404).body(V2Error.of(404,"not_found","Resource not found",requestId.toString()));
+      return ResponseEntity.status(404).body(V2Error.of(404, "not_found", "Resource not found", requestId.toString()));
     }
-    return ResponseEntity.status(404).body(new ApiErrorResponse(Instant.now(),404,"Not Found",
-        "Resource not found",request.getRequestURI(),List.of(error.getMessage())));
+    return ResponseEntity.status(404)
+        .body(
+            new ApiErrorResponse(
+                Instant.now(),
+                404,
+                "Not Found",
+                "Resource not found",
+                request.getRequestURI(),
+                List.of(error.getMessage())));
   }
 }

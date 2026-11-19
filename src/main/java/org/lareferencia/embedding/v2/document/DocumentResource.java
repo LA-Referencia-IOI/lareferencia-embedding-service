@@ -8,7 +8,17 @@ import java.util.List;
 import java.util.UUID;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-public record DocumentResource(UUID id,String externalId,UUID collectionId,long revision,JsonNode metadata,
-    List<SourceTextResource> texts,Instant createdAt,Instant updatedAt) {
-  @Override public String toString() { return "DocumentResource[redacted]"; }
+public record DocumentResource(
+    UUID id,
+    String externalId,
+    UUID collectionId,
+    long revision,
+    JsonNode metadata,
+    List<SourceTextResource> texts,
+    Instant createdAt,
+    Instant updatedAt) {
+  @Override
+  public String toString() {
+    return "DocumentResource[redacted]";
+  }
 }

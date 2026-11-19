@@ -9,7 +9,6 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.lareferencia.embedding.v1.config.EmbeddingProviderProperties;
@@ -37,11 +36,12 @@ class EmbeddingProviderServiceTest {
 
   @Test
   void includesProviderUrlWhenEmbeddingCallFails() {
-    mockServer.expect(requestTo("http://localhost:11434/v1/embeddings"))
-        .andRespond(withServerError());
+    mockServer.expect(requestTo("http://localhost:11434/v1/embeddings")).andRespond(withServerError());
 
-    EmbeddingProviderException exception = assertThrows(EmbeddingProviderException.class,
-        () -> service.embed(java.util.List.of("hello world"), "nomic-embed-text", 3));
+    EmbeddingProviderException exception =
+        assertThrows(
+            EmbeddingProviderException.class,
+            () -> service.embed(java.util.List.of("hello world"), "nomic-embed-text", 3));
 
     assertTrue(exception.getMessage().contains("providerUrl=http://localhost:11434/v1/embeddings"));
     mockServer.verify();
@@ -59,11 +59,13 @@ class EmbeddingProviderServiceTest {
     RestClient restClient = builder.build();
     EmbeddingProviderService openAiService = new EmbeddingProviderService(restClient, new ObjectMapper(), properties);
 
-    server.expect(requestTo("https://api.openai.com/v1/embeddings"))
+    server
+        .expect(requestTo("https://api.openai.com/v1/embeddings"))
         .andExpect(header("Authorization", "Bearer test-key"))
-        .andRespond(withSuccess(
-            "{\"data\":[{\"embedding\":[0.1,0.2,0.3],\"index\":0}],\"usage\":{\"prompt_tokens\":7,\"total_tokens\":7}}",
-            MediaType.APPLICATION_JSON));
+        .andRespond(
+            withSuccess(
+                "{\"data\":[{\"embedding\":[0.1,0.2,0.3],\"index\":0}],\"usage\":{\"prompt_tokens\":7,\"total_tokens\":7}}",
+                MediaType.APPLICATION_JSON));
 
     var result = openAiService.embed(java.util.List.of("hello world"), "text-embedding-3-small", 3);
     assertEquals("openai", result.provider());
@@ -76,10 +78,12 @@ class EmbeddingProviderServiceTest {
 
   @Test
   void doesNotExtractUsageForOllama() {
-    mockServer.expect(requestTo("http://localhost:11434/v1/embeddings"))
-        .andRespond(withSuccess(
-            "{\"data\":[{\"embedding\":[0.1,0.2],\"index\":0}],\"usage\":{\"prompt_eval_count\":4,\"eval_count\":4}}",
-            MediaType.APPLICATION_JSON));
+    mockServer
+        .expect(requestTo("http://localhost:11434/v1/embeddings"))
+        .andRespond(
+            withSuccess(
+                "{\"data\":[{\"embedding\":[0.1,0.2],\"index\":0}],\"usage\":{\"prompt_eval_count\":4,\"eval_count\":4}}",
+                MediaType.APPLICATION_JSON));
 
     var result = service.embed(java.util.List.of("hello world"), "nomic-embed-text", 2);
     assertEquals("ollama", result.provider());
@@ -98,14 +102,16 @@ class EmbeddingProviderServiceTest {
     RestClient.Builder builder = RestClient.builder();
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
     RestClient restClient = builder.build();
-    EmbeddingProviderService openRouterService = new EmbeddingProviderService(restClient, new ObjectMapper(),
-        properties);
+    EmbeddingProviderService openRouterService =
+        new EmbeddingProviderService(restClient, new ObjectMapper(), properties);
 
-    server.expect(requestTo("https://openrouter.ai/api/v1/embeddings"))
+    server
+        .expect(requestTo("https://openrouter.ai/api/v1/embeddings"))
         .andExpect(header("Authorization", "Bearer test-key"))
-        .andRespond(withSuccess(
-            "{\"data\":[{\"embedding\":[0.1,0.2,0.3],\"index\":0}],\"usage\":{\"prompt_tokens\":6,\"total_tokens\":6}}",
-            MediaType.APPLICATION_JSON));
+        .andRespond(
+            withSuccess(
+                "{\"data\":[{\"embedding\":[0.1,0.2,0.3],\"index\":0}],\"usage\":{\"prompt_tokens\":6,\"total_tokens\":6}}",
+                MediaType.APPLICATION_JSON));
 
     var result = openRouterService.embed(java.util.List.of("hello world"), "text-embedding-3-small", 3);
     assertEquals("openrouter", result.provider());
@@ -116,27 +122,32 @@ class EmbeddingProviderServiceTest {
 
   @Test
   void reordersProviderDataByIndex() {
-    mockServer.expect(requestTo("http://localhost:11434/v1/embeddings"))
-        .andRespond(withSuccess("""
-            {"data":[{"index":1,"embedding":[2,3]},{"index":0,"embedding":[1,2]}]}
-            """, MediaType.APPLICATION_JSON));
+    mockServer
+        .expect(requestTo("http://localhost:11434/v1/embeddings"))
+        .andRespond(
+            withSuccess(
+                """
+                {"data":[{"index":1,"embedding":[2,3]},{"index":0,"embedding":[1,2]}]}
+                """,
+                MediaType.APPLICATION_JSON));
     var result = service.embed(java.util.List.of("first", "second"), "model", 2);
     org.junit.jupiter.api.Assertions.assertArrayEquals(new float[] {1, 2}, result.embeddings().get(0));
     org.junit.jupiter.api.Assertions.assertArrayEquals(new float[] {2, 3}, result.embeddings().get(1));
   }
 
   @org.junit.jupiter.params.ParameterizedTest
-  @org.junit.jupiter.params.provider.ValueSource(strings = {
-      "{\"data\":[{\"embedding\":[1,2]}]}",
-      "{\"data\":[{\"index\":1,\"embedding\":[1,2]}]}",
-      "{\"data\":[{\"index\":0.5,\"embedding\":[1,2]}]}",
-      "{\"data\":[{\"index\":0,\"embedding\":[1]}]}",
-      "{\"data\":[{\"index\":0,\"embedding\":[1,2]},{\"index\":0,\"embedding\":[3,4]}]}"
-  })
+  @org.junit.jupiter.params.provider.ValueSource(
+      strings = {
+        "{\"data\":[{\"embedding\":[1,2]}]}",
+        "{\"data\":[{\"index\":1,\"embedding\":[1,2]}]}",
+        "{\"data\":[{\"index\":0.5,\"embedding\":[1,2]}]}",
+        "{\"data\":[{\"index\":0,\"embedding\":[1]}]}",
+        "{\"data\":[{\"index\":0,\"embedding\":[1,2]},{\"index\":0,\"embedding\":[3,4]}]}"
+      })
   void rejectsAmbiguousOrIncompatibleProviderData(String response) {
-    mockServer.expect(requestTo("http://localhost:11434/v1/embeddings"))
+    mockServer
+        .expect(requestTo("http://localhost:11434/v1/embeddings"))
         .andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
-    assertThrows(EmbeddingProviderException.class,
-        () -> service.embed(java.util.List.of("first"), "model", 2));
+    assertThrows(EmbeddingProviderException.class, () -> service.embed(java.util.List.of("first"), "model", 2));
   }
 }

@@ -9,7 +9,16 @@ import java.util.UUID;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record DocumentSummary(UUID id,String externalId,UUID collectionId,long revision,JsonNode metadata,
-    Instant createdAt,Instant updatedAt) {
-  @Override public String toString() { return "DocumentSummary[redacted]"; }
+public record DocumentSummary(
+    UUID id,
+    String externalId,
+    UUID collectionId,
+    long revision,
+    JsonNode metadata,
+    Instant createdAt,
+    Instant updatedAt) {
+  @Override
+  public String toString() {
+    return "DocumentSummary[redacted]";
+  }
 }

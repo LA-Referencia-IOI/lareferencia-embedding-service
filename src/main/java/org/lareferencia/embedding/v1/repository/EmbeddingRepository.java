@@ -1,5 +1,6 @@
 package org.lareferencia.embedding.v1.repository;
 
+import com.pgvector.PGvector;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -10,12 +11,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.util.stream.Collectors;
-
-import com.pgvector.PGvector;
-
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.lareferencia.embedding.v1.config.PgVectorStoreProperties;
 import org.lareferencia.embedding.v1.service.StoreTableNamingService;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
@@ -23,9 +21,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Repository;
-
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Repository
 @RequiredArgsConstructor
@@ -52,12 +49,13 @@ public class EmbeddingRepository {
     }
     initializeStoreTable(storeId, tableName, embeddingDimensions, createIndex);
     if (TransactionSynchronizationManager.isSynchronizationActive()) {
-      TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-        @Override
-        public void afterCommit() {
-          initializedTables.put(key, Boolean.TRUE);
-        }
-      });
+      TransactionSynchronizationManager.registerSynchronization(
+          new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+              initializedTables.put(key, Boolean.TRUE);
+            }
+          });
     } else {
       initializedTables.put(key, Boolean.TRUE);
     }
@@ -77,17 +75,17 @@ public class EmbeddingRepository {
 
     List<String> orderedHashes = new ArrayList<>(hashes);
     String placeholders = orderedHashes.stream().map(ignored -> "?").collect(Collectors.joining(", "));
-    String sql = "SELECT id AS hash, embedding::text AS embedding FROM %s WHERE id IN (%s)".formatted(
-        qualifiedTableName,
-        placeholders);
+    String sql =
+        "SELECT id AS hash, embedding::text AS embedding FROM %s WHERE id IN (%s)"
+            .formatted(qualifiedTableName, placeholders);
 
     Map<String, float[]> results = new LinkedHashMap<>();
     jdbcTemplate.query(
         sql,
         (RowCallbackHandler) rs -> results.put(rs.getString("hash"), parseVector(rs.getString("embedding"))),
         orderedHashes.toArray());
-    log.debug("Database cache lookup storeId={} requestedHashes={} found={}", storeId, orderedHashes.size(),
-        results.size());
+    log.debug(
+        "Database cache lookup storeId={} requestedHashes={} found={}", storeId, orderedHashes.size(), results.size());
     return results;
   }
 
@@ -96,32 +94,35 @@ public class EmbeddingRepository {
       return;
     }
 
-    embeddingsByHash.forEach(
-        (hash, embedding) -> validateEmbedding(hash, embedding, embeddingDimensions));
+    embeddingsByHash.forEach((hash, embedding) -> validateEmbedding(hash, embedding, embeddingDimensions));
     ensureStoreTableExists(storeId, embeddingDimensions, false);
     String qualifiedTableName = qualifiedTableName(storeId);
     List<Map.Entry<String, float[]>> entries = new ArrayList<>(embeddingsByHash.entrySet());
-    String sql = """
+    String sql =
+        """
           INSERT INTO %s (id, embedding)
           VALUES (?, ?)
           ON CONFLICT (id) DO NOTHING
-        """.formatted(qualifiedTableName);
+        """
+            .formatted(qualifiedTableName);
 
-    jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
-      @Override
-      public void setValues(@NonNull PreparedStatement ps, int index) throws SQLException {
-        Map.Entry<String, float[]> entry = entries.get(index);
-        ps.setString(1, entry.getKey());
-        ps.setObject(2, new PGvector(entry.getValue()));
-      }
+    jdbcTemplate.batchUpdate(
+        sql,
+        new BatchPreparedStatementSetter() {
+          @Override
+          public void setValues(@NonNull PreparedStatement ps, int index) throws SQLException {
+            Map.Entry<String, float[]> entry = entries.get(index);
+            ps.setString(1, entry.getKey());
+            ps.setObject(2, new PGvector(entry.getValue()));
+          }
 
-      @Override
-      public int getBatchSize() {
-        return entries.size();
-      }
-    });
-    log.debug("Persisted embeddings into database storeId={} rows={} table={}", storeId, entries.size(),
-        qualifiedTableName);
+          @Override
+          public int getBatchSize() {
+            return entries.size();
+          }
+        });
+    log.debug(
+        "Persisted embeddings into database storeId={} rows={} table={}", storeId, entries.size(), qualifiedTableName);
   }
 
   private void initializeStoreTable(UUID storeId, String tableName, int embeddingDimensions, boolean createIndex) {
@@ -137,25 +138,28 @@ public class EmbeddingRepository {
     }
 
     String qualifiedTableName = qualifiedTableName(tableName);
-    String createTableSql = """
+    String createTableSql =
+        """
         CREATE TABLE IF NOT EXISTS %s (
           id TEXT PRIMARY KEY,
           embedding vector(%d) NOT NULL,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
-        """.formatted(qualifiedTableName, embeddingDimensions);
+        """
+            .formatted(qualifiedTableName, embeddingDimensions);
     jdbcTemplate.execute(createTableSql);
 
     PgVectorStoreProperties.IndexType indexType = resolvedIndexType(embeddingDimensions);
     if (createIndex && indexType != PgVectorStoreProperties.IndexType.NONE) {
       String vectorIndexName = vectorIndexName(tableName);
       validateIdentifier(vectorIndexName, "index name");
-      String vectorIndexSql = "CREATE INDEX IF NOT EXISTS %s ON %s USING %s (embedding %s)"
-          .formatted(
-              vectorIndexName,
-              qualifiedTableName,
-              indexMethod(indexType),
-              vectorOperatorClass(pgVectorStoreProperties.getDistanceType()));
+      String vectorIndexSql =
+          "CREATE INDEX IF NOT EXISTS %s ON %s USING %s (embedding %s)"
+              .formatted(
+                  vectorIndexName,
+                  qualifiedTableName,
+                  indexMethod(indexType),
+                  vectorOperatorClass(pgVectorStoreProperties.getDistanceType()));
       jdbcTemplate.execute(vectorIndexSql);
     }
   }
@@ -173,8 +177,7 @@ public class EmbeddingRepository {
 
   private PgVectorStoreProperties.IndexType resolvedIndexType(int embeddingDimensions) {
     PgVectorStoreProperties.IndexType configuredIndexType = pgVectorStoreProperties.getIndexType();
-    if (configuredIndexType == PgVectorStoreProperties.IndexType.HNSW
-        && embeddingDimensions > MAX_HNSW_DIMENSIONS) {
+    if (configuredIndexType == PgVectorStoreProperties.IndexType.HNSW && embeddingDimensions > MAX_HNSW_DIMENSIONS) {
       log.warn(
           "Disabling HNSW index for embedding dimensions={} because pgvector supports at most {} dimensions for HNSW",
           embeddingDimensions,
@@ -205,10 +208,9 @@ public class EmbeddingRepository {
   }
 
   private void validateSchemaExists(String schemaName) {
-    Integer count = jdbcTemplate.queryForObject(
-        "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?",
-        Integer.class,
-        schemaName);
+    Integer count =
+        jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?", Integer.class, schemaName);
 
     if (count == null || count == 0) {
       throw new IllegalArgumentException("Configured schema does not exist: " + schemaName);
@@ -220,8 +222,8 @@ public class EmbeddingRepository {
       throw new IllegalArgumentException("Embedding for hash " + hash + " must not be empty");
     }
     if (embedding.length != expectedDimensions) {
-      throw new IllegalArgumentException("Embedding for hash " + hash + " has dimension " + embedding.length
-          + " but expected " + expectedDimensions);
+      throw new IllegalArgumentException(
+          "Embedding for hash " + hash + " has dimension " + embedding.length + " but expected " + expectedDimensions);
     }
   }
 
@@ -239,6 +241,5 @@ public class EmbeddingRepository {
     }
   }
 
-  private record StoreVectorKey(String tableName, int embeddingDimensions, boolean createIndex) {
-  }
+  private record StoreVectorKey(String tableName, int embeddingDimensions, boolean createIndex) {}
 }

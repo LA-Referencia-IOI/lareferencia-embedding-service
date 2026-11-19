@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 @ConfigurationPropertiesScan
 public class LAReferenciaEmbeddingServiceApplication {
 
-	public static void main(String[] args) {
-		SpringApplication.run(LAReferenciaEmbeddingServiceApplication.class, args);
-	}
+  public static void main(String[] args) {
+    SpringApplication.run(LAReferenciaEmbeddingServiceApplication.class, args);
+  }
 }

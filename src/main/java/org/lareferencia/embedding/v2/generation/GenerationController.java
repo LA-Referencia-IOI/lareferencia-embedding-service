@@ -9,22 +9,37 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
 
-@io.swagger.v3.oas.annotations.tags.Tag(name="v2 Generation")
+@io.swagger.v3.oas.annotations.tags.Tag(name = "v2 Generation")
 @RestController
 @RequestMapping("/api/v2/collections/{collection}/indexations/{indexation}/generation-jobs")
 @ConditionalOnExpression("${app.dvp.enabled:false} && !'${app.dvp.role:api}'.equalsIgnoreCase('worker')")
 public class GenerationController {
   private final GenerationJobService service;
-  public GenerationController(GenerationJobService service) { this.service=service; }
+
+  public GenerationController(GenerationJobService service) {
+    this.service = service;
+  }
+
   @PostMapping
-  @Operation(summary="Generate missing vectors",description="Requires Idempotency-Key. An empty or absent document_ids list selects the collection; inference runs asynchronously.")
-  @io.swagger.v3.oas.annotations.parameters.RequestBody(content=@io.swagger.v3.oas.annotations.media.Content(
-      schema=@io.swagger.v3.oas.annotations.media.Schema(type="object"),examples=@io.swagger.v3.oas.annotations.media.ExampleObject(value="{\"document_ids\":[]}")))
-  @ApiResponse(responseCode="202",description="Generation job queued")
-  public ResponseEntity<JsonNode> create(@PathVariable String collection,@PathVariable String indexation,
-      @RequestBody(required=false) IndexationBody body,@RequestHeader("Idempotency-Key") String key,
-      @RequestParam MultiValueMap<String,String> query) {
-    var result=service.create(collection,indexation,body==null?null:body.value(),key,query);
-    var response=ResponseEntity.status(result.status());result.headers().forEach(response::header);return response.body(result.body());
+  @Operation(
+      summary = "Generate missing vectors",
+      description =
+          "Requires Idempotency-Key. An empty or absent document_ids list selects the collection; inference runs asynchronously.")
+  @io.swagger.v3.oas.annotations.parameters.RequestBody(
+      content =
+          @io.swagger.v3.oas.annotations.media.Content(
+              schema = @io.swagger.v3.oas.annotations.media.Schema(type = "object"),
+              examples = @io.swagger.v3.oas.annotations.media.ExampleObject(value = "{\"document_ids\":[]}")))
+  @ApiResponse(responseCode = "202", description = "Generation job queued")
+  public ResponseEntity<JsonNode> create(
+      @PathVariable String collection,
+      @PathVariable String indexation,
+      @RequestBody(required = false) IndexationBody body,
+      @RequestHeader("Idempotency-Key") String key,
+      @RequestParam MultiValueMap<String, String> query) {
+    var result = service.create(collection, indexation, body == null ? null : body.value(), key, query);
+    var response = ResponseEntity.status(result.status());
+    result.headers().forEach(response::header);
+    return response.body(result.body());
   }
 }

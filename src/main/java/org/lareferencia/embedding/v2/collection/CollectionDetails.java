@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-public record CollectionDetails(UUID id,String slug,String name,Instant createdAt,Counts counts) {
+public record CollectionDetails(UUID id, String slug, String name, Instant createdAt, Counts counts) {
   @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-  public record Counts(long documents,long indexations) {}
+  public record Counts(long documents, long indexations) {}
 }

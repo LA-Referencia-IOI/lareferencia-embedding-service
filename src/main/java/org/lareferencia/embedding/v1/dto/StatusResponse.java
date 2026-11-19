@@ -4,23 +4,11 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-public record StatusResponse(
-    Instant timestamp,
-    SystemStatus system,
-    DatabaseStatus database) {
+public record StatusResponse(Instant timestamp, SystemStatus system, DatabaseStatus database) {
 
-  public record SystemStatus(
-      CpuStatus cpu,
-      MemoryStatus ram,
-      DiskStatus disk) {
-  }
+  public record SystemStatus(CpuStatus cpu, MemoryStatus ram, DiskStatus disk) {}
 
-  public record CpuStatus(
-      int availableProcessors,
-      Double usagePercent,
-      Double freePercent,
-      double systemLoadAverage) {
-  }
+  public record CpuStatus(int availableProcessors, Double usagePercent, Double freePercent, double systemLoadAverage) {}
 
   public record MemoryStatus(
       long totalBytes,
@@ -30,8 +18,7 @@ public record StatusResponse(
       double freePercent,
       String total,
       String used,
-      String free) {
-  }
+      String free) {}
 
   public record DiskStatus(
       long totalBytes,
@@ -44,8 +31,7 @@ public record StatusResponse(
       String used,
       String free,
       String usable,
-      List<DiskVolumeStatus> volumes) {
-  }
+      List<DiskVolumeStatus> volumes) {}
 
   public record DiskVolumeStatus(
       String path,
@@ -58,8 +44,7 @@ public record StatusResponse(
       String total,
       String used,
       String free,
-      String usable) {
-  }
+      String usable) {}
 
   public record DatabaseStatus(
       String name,
@@ -67,8 +52,7 @@ public record StatusResponse(
       String size,
       long storeCount,
       long embeddingTableCount,
-      List<EmbeddingTableStatus> embeddingTables) {
-  }
+      List<EmbeddingTableStatus> embeddingTables) {}
 
   public record EmbeddingTableStatus(
       String schema,
@@ -83,6 +67,5 @@ public record StatusResponse(
       long estimatedRows,
       String tableSize,
       String indexesSize,
-      String totalSize) {
-  }
+      String totalSize) {}
 }

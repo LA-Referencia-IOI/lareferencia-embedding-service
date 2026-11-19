@@ -9,15 +9,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-
+import lombok.RequiredArgsConstructor;
 import org.lareferencia.embedding.v1.config.PgVectorStoreProperties;
 import org.lareferencia.embedding.v1.dto.StatusResponse;
 import org.lareferencia.embedding.v1.entity.StoreEntity;
 import org.lareferencia.embedding.v1.repository.StatusRepository;
 import org.lareferencia.embedding.v1.repository.StoreRepository;
 import org.springframework.stereotype.Service;
-
-import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -30,12 +28,13 @@ public class StatusService {
 
   public StatusResponse status() {
     List<StoreEntity> stores = storeRepository.findAll();
-    Map<String, StoreEntity> storesByTableName = stores.stream()
-        .collect(Collectors.toMap(store -> tableNamingService.tableName(store.getId()), Function.identity()));
-    List<StatusResponse.EmbeddingTableStatus> embeddingTables = statusRepository
-        .embeddingTableStats(pgVectorStoreProperties.getSchemaName()).stream()
-        .map(tableStats -> toEmbeddingTableStatus(tableStats, storesByTableName.get(tableStats.tableName())))
-        .toList();
+    Map<String, StoreEntity> storesByTableName =
+        stores.stream()
+            .collect(Collectors.toMap(store -> tableNamingService.tableName(store.getId()), Function.identity()));
+    List<StatusResponse.EmbeddingTableStatus> embeddingTables =
+        statusRepository.embeddingTableStats(pgVectorStoreProperties.getSchemaName()).stream()
+            .map(tableStats -> toEmbeddingTableStatus(tableStats, storesByTableName.get(tableStats.tableName())))
+            .toList();
     long databaseSizeBytes = statusRepository.currentDatabaseSizeBytes();
 
     return new StatusResponse(
@@ -51,8 +50,7 @@ public class StatusService {
   }
 
   private StatusResponse.EmbeddingTableStatus toEmbeddingTableStatus(
-      StatusRepository.EmbeddingTableStats tableStats,
-      StoreEntity store) {
+      StatusRepository.EmbeddingTableStats tableStats, StoreEntity store) {
     return new StatusResponse.EmbeddingTableStatus(
         tableStats.schemaName(),
         tableStats.tableName(),
@@ -81,10 +79,7 @@ public class StatusService {
     }
     Double freePercent = usagePercent == null ? null : roundPercent(100 - usagePercent);
     return new StatusResponse.CpuStatus(
-        standardBean.getAvailableProcessors(),
-        usagePercent,
-        freePercent,
-        standardBean.getSystemLoadAverage());
+        standardBean.getAvailableProcessors(), usagePercent, freePercent, standardBean.getSystemLoadAverage());
   }
 
   private StatusResponse.MemoryStatus memoryStatus() {
@@ -109,11 +104,13 @@ public class StatusService {
 
   private StatusResponse.DiskStatus diskStatus() {
     File[] roots = File.listRoots();
-    List<StatusResponse.DiskVolumeStatus> volumes = (roots == null ? List.<File>of() : List.of(roots)).stream()
-        .filter(root -> root.getTotalSpace() > 0)
-        .sorted(Comparator.comparing(File::getAbsolutePath))
-        .map(this::diskVolumeStatus)
-        .toList();
+    List<StatusResponse.DiskVolumeStatus> volumes =
+        (roots == null ? List.<File>of() : List.of(roots))
+            .stream()
+                .filter(root -> root.getTotalSpace() > 0)
+                .sorted(Comparator.comparing(File::getAbsolutePath))
+                .map(this::diskVolumeStatus)
+                .toList();
     long totalBytes = volumes.stream().mapToLong(StatusResponse.DiskVolumeStatus::totalBytes).sum();
     long freeBytes = volumes.stream().mapToLong(StatusResponse.DiskVolumeStatus::freeBytes).sum();
     long usableBytes = volumes.stream().mapToLong(StatusResponse.DiskVolumeStatus::usableBytes).sum();
@@ -173,7 +170,7 @@ public class StatusService {
     if (bytes < 1024) {
       return bytes + " B";
     }
-    String[] units = { "KiB", "MiB", "GiB", "TiB", "PiB" };
+    String[] units = {"KiB", "MiB", "GiB", "TiB", "PiB"};
     double value = bytes;
     int unitIndex = -1;
     do {

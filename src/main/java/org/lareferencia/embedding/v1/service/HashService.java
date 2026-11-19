@@ -1,11 +1,9 @@
 package org.lareferencia.embedding.v1.service;
 
 import java.nio.charset.StandardCharsets;
-
-import org.springframework.stereotype.Service;
-
 import net.jpountz.xxhash.XXHash64;
 import net.jpountz.xxhash.XXHashFactory;
+import org.springframework.stereotype.Service;
 
 @Service
 public class HashService {

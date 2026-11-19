@@ -426,6 +426,18 @@ Common statuses:
 
 ## Testing
 
+Format the Java application and test sources with the Maven wrapper:
+
+```bash
+./mvnw spotless:apply
+```
+
+To check formatting without modifying files, run `./mvnw spotless:check`. The
+formatter uses Google Java Format with a 120-column line limit, orders and removes unused imports, trims
+trailing whitespace, and ensures a final newline. Maven must run on Java 21,
+as does the project build. Python, SQL, and documentation files are outside
+its scope.
+
 Run the test suite:
 
 ```bash

@@ -5,4 +5,4 @@ import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import java.util.List;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-public record PageResponse<T>(List<T> items,String nextCursor) {}
+public record PageResponse<T>(List<T> items, String nextCursor) {}

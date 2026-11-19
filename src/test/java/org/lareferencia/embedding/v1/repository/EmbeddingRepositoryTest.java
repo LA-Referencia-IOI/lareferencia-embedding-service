@@ -9,7 +9,6 @@ import static org.mockito.Mockito.verify;
 
 import java.util.List;
 import java.util.UUID;
-
 import org.junit.jupiter.api.Test;
 import org.lareferencia.embedding.v1.config.PgVectorStoreProperties;
 import org.lareferencia.embedding.v1.service.StoreTableNamingService;
@@ -18,53 +17,59 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 class EmbeddingRepositoryTest {
 
-        private static final UUID STORE_ID_1 = UUID.fromString("11111111-1111-1111-1111-111111111111");
+  private static final UUID STORE_ID_1 = UUID.fromString("11111111-1111-1111-1111-111111111111");
 
-        @Test
-        void initializesStoreTablesThroughPureJdbcPgvector() {
-                JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-                doNothing().when(jdbcTemplate).execute(any(String.class));
-                PgVectorStoreProperties properties = new PgVectorStoreProperties();
-                properties.setSchemaValidation(false);
-                EmbeddingRepository repository = new EmbeddingRepository(jdbcTemplate,
-                                new StoreTableNamingService(), properties);
+  @Test
+  void initializesStoreTablesThroughPureJdbcPgvector() {
+    JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+    doNothing().when(jdbcTemplate).execute(any(String.class));
+    PgVectorStoreProperties properties = new PgVectorStoreProperties();
+    properties.setSchemaValidation(false);
+    EmbeddingRepository repository = new EmbeddingRepository(jdbcTemplate, new StoreTableNamingService(), properties);
 
-                repository.ensureStoreTableExists(STORE_ID_1, 768, false);
+    repository.ensureStoreTableExists(STORE_ID_1, 768, false);
 
-                ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-                verify(jdbcTemplate, times(1)).execute(sqlCaptor.capture());
+    ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+    verify(jdbcTemplate, times(1)).execute(sqlCaptor.capture());
 
-                List<String> executedSql = sqlCaptor.getAllValues();
-                assertTrue(executedSql.stream().anyMatch(sql -> sql.contains("CREATE TABLE IF NOT EXISTS")
-                                && sql.contains("embeddings_11111111_1111_1111_1111_111111111111")
-                                && sql.contains("vector(768)")));
-                assertTrue(executedSql.stream().noneMatch(sql -> sql.contains("USING HNSW")
-                                || sql.contains("USING IVFFLAT")));
-        }
+    List<String> executedSql = sqlCaptor.getAllValues();
+    assertTrue(
+        executedSql.stream()
+            .anyMatch(sql ->
+                sql.contains("CREATE TABLE IF NOT EXISTS")
+                    && sql.contains("embeddings_11111111_1111_1111_1111_111111111111")
+                    && sql.contains("vector(768)")));
+    assertTrue(executedSql.stream().noneMatch(sql -> sql.contains("USING HNSW") || sql.contains("USING IVFFLAT")));
+  }
 
-        @Test
-        void disablesHnswIndexForEmbeddingsLargerThanTwoThousandDimensions() {
-                JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-                doNothing().when(jdbcTemplate).execute(any(String.class));
-                PgVectorStoreProperties properties = new PgVectorStoreProperties();
-                properties.setSchemaValidation(false);
-                properties.setIndexType(PgVectorStoreProperties.IndexType.HNSW);
-                EmbeddingRepository repository = new EmbeddingRepository(jdbcTemplate,
-                                new StoreTableNamingService(), properties);
+  @Test
+  void disablesHnswIndexForEmbeddingsLargerThanTwoThousandDimensions() {
+    JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+    doNothing().when(jdbcTemplate).execute(any(String.class));
+    PgVectorStoreProperties properties = new PgVectorStoreProperties();
+    properties.setSchemaValidation(false);
+    properties.setIndexType(PgVectorStoreProperties.IndexType.HNSW);
+    EmbeddingRepository repository = new EmbeddingRepository(jdbcTemplate, new StoreTableNamingService(), properties);
 
-                repository.ensureStoreTableExists(STORE_ID_1, 2560, true);
+    repository.ensureStoreTableExists(STORE_ID_1, 2560, true);
 
-                ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-                verify(jdbcTemplate, times(1)).execute(sqlCaptor.capture());
+    ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+    verify(jdbcTemplate, times(1)).execute(sqlCaptor.capture());
 
-                List<String> executedSql = sqlCaptor.getAllValues();
-                assertTrue(executedSql.stream().anyMatch(sql -> sql.contains("CREATE TABLE IF NOT EXISTS")
-                                && sql.contains("embeddings_11111111_1111_1111_1111_111111111111")
-                                && sql.contains("vector(2560)")));
-                assertTrue(executedSql.stream().noneMatch(sql -> sql.contains("USING HNSW")
-                                || sql.contains("USING IVFFLAT")
-                                || sql.contains("vector_cosine_ops")
-                                || sql.contains("vector_l2_ops")
-                                || sql.contains("vector_ip_ops")));
-        }
+    List<String> executedSql = sqlCaptor.getAllValues();
+    assertTrue(
+        executedSql.stream()
+            .anyMatch(sql ->
+                sql.contains("CREATE TABLE IF NOT EXISTS")
+                    && sql.contains("embeddings_11111111_1111_1111_1111_111111111111")
+                    && sql.contains("vector(2560)")));
+    assertTrue(
+        executedSql.stream()
+            .noneMatch(sql ->
+                sql.contains("USING HNSW")
+                    || sql.contains("USING IVFFLAT")
+                    || sql.contains("vector_cosine_ops")
+                    || sql.contains("vector_l2_ops")
+                    || sql.contains("vector_ip_ops")));
+  }
 }

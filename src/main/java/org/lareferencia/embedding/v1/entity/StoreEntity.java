@@ -1,8 +1,5 @@
 package org.lareferencia.embedding.v1.entity;
 
-import java.time.Instant;
-import java.util.UUID;
-
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -11,7 +8,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
-
+import java.time.Instant;
+import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -19,10 +17,14 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "stores", uniqueConstraints = {
-    @UniqueConstraint(name = "uk_store_name", columnNames = "name"),
-    @UniqueConstraint(name = "uk_store_model_dimension", columnNames = { "model", "embedding_dimension" })
-})
+@Table(
+    name = "stores",
+    uniqueConstraints = {
+      @UniqueConstraint(name = "uk_store_name", columnNames = "name"),
+      @UniqueConstraint(
+          name = "uk_store_model_dimension",
+          columnNames = {"model", "embedding_dimension"})
+    })
 @Getter
 @Setter
 @Builder

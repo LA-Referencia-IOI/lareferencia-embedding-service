@@ -1,10 +1,10 @@
 package org.lareferencia.embedding.v1.service;
 
-import java.util.List;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
+import java.util.List;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.lareferencia.embedding.v1.config.EmbeddingProviderProperties;
 import org.lareferencia.embedding.v1.exception.EmbeddingProviderException;
 import org.springframework.http.HttpHeaders;
@@ -12,9 +12,6 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
-
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
@@ -35,15 +32,16 @@ public class EmbeddingProviderService {
 
     try {
       String provider = providerName();
-      log.info("Calling external embedding provider provider={} model={} inputs={}", provider, model,
-          inputs.size());
-      JsonNode response = embeddingRestClient.post()
-          .uri(providerEndpoint())
-          .headers(this::applyAuthentication)
-          .contentType(MediaType.APPLICATION_JSON)
-          .body(new EmbeddingRequest(model, inputs, dimensions))
-          .retrieve()
-          .body(JsonNode.class);
+      log.info("Calling external embedding provider provider={} model={} inputs={}", provider, model, inputs.size());
+      JsonNode response =
+          embeddingRestClient
+              .post()
+              .uri(providerEndpoint())
+              .headers(this::applyAuthentication)
+              .contentType(MediaType.APPLICATION_JSON)
+              .body(new EmbeddingRequest(model, inputs, dimensions))
+              .retrieve()
+              .body(JsonNode.class);
 
       EmbeddingBatchResult result = parseProviderResponse(response, provider, inputs.size(), dimensions);
       List<float[]> embeddings = result.embeddings();
@@ -52,20 +50,28 @@ public class EmbeddingProviderService {
         throw new EmbeddingProviderException(
             "Embedding model returned " + embeddings.size() + " embeddings for " + inputs.size() + " inputs");
       }
-      log.info("External embedding provider returned provider={} model={} embeddings={}", provider, model,
+      log.info(
+          "External embedding provider returned provider={} model={} embeddings={}",
+          provider,
+          model,
           embeddings.size());
       return result;
     } catch (EmbeddingProviderException exception) {
       String provider = providerName();
-      log.error("External embedding provider returned an application error provider={} model={} message={}",
+      log.error(
+          "External embedding provider returned an application error provider={} model={} message={}",
           provider,
           model,
           exception.getMessage());
       throw exception;
     } catch (RuntimeException exception) {
       String providerMessage = resolveProviderMessage(exception);
-      log.error("External embedding provider call failed provider={} model={} message={}", providerName(), model,
-          providerMessage, exception);
+      log.error(
+          "External embedding provider call failed provider={} model={} message={}",
+          providerName(),
+          model,
+          providerMessage,
+          exception);
       throw new EmbeddingProviderException(providerMessage, exception);
     }
   }
@@ -94,7 +100,8 @@ public class EmbeddingProviderService {
 
     JsonNode dataNode = response.get("data");
     if (dataNode != null && dataNode.isArray()) {
-      return new EmbeddingBatchResult(toEmbeddingList(dataNode, count, dimensions), provider, extractUsage(response, provider));
+      return new EmbeddingBatchResult(
+          toEmbeddingList(dataNode, count, dimensions), provider, extractUsage(response, provider));
     }
 
     throw new EmbeddingProviderException("Embedding response does not contain 'data' vectors");
@@ -135,8 +142,12 @@ public class EmbeddingProviderService {
     float[][] ordered = new float[count][];
     for (JsonNode item : dataNode) {
       JsonNode index = item.get("index");
-      if (index == null || !index.isIntegralNumber() || !index.canConvertToInt()
-          || index.intValue() < 0 || index.intValue() >= count || ordered[index.intValue()] != null) {
+      if (index == null
+          || !index.isIntegralNumber()
+          || !index.canConvertToInt()
+          || index.intValue() < 0
+          || index.intValue() >= count
+          || ordered[index.intValue()] != null) {
         throw new EmbeddingProviderException("Provider returned missing, duplicate or invalid embedding index");
       }
       JsonNode values = item.get("embedding");
@@ -176,24 +187,21 @@ public class EmbeddingProviderService {
   }
 
   private String providerEndpoint() {
-    String url = switch (ollamaClientProperties.getType()) {
-      case OLLAMA -> ollamaClientProperties.getOllamaUrl();
-      case OPENAI -> ollamaClientProperties.getOpenaiUrl();
-      case OPENROUTER -> ollamaClientProperties.getOpenrouterUrl();
-    };
+    String url =
+        switch (ollamaClientProperties.getType()) {
+          case OLLAMA -> ollamaClientProperties.getOllamaUrl();
+          case OPENAI -> ollamaClientProperties.getOpenaiUrl();
+          case OPENROUTER -> ollamaClientProperties.getOpenrouterUrl();
+        };
     if (!StringUtils.hasText(url)) {
-      throw new EmbeddingProviderException("Embedding provider URL must not be blank for provider "
-          + providerName());
+      throw new EmbeddingProviderException("Embedding provider URL must not be blank for provider " + providerName());
     }
     return url;
   }
 
-  private record EmbeddingRequest(String model, List<String> input, int dimensions) {
-  }
+  private record EmbeddingRequest(String model, List<String> input, int dimensions) {}
 
-  public record UsageData(int promptTokens, int totalTokens) {
-  }
+  public record UsageData(int promptTokens, int totalTokens) {}
 
-  public record EmbeddingBatchResult(List<float[]> embeddings, String provider, UsageData usage) {
-  }
+  public record EmbeddingBatchResult(List<float[]> embeddings, String provider, UsageData usage) {}
 }

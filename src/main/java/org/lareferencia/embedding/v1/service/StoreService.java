@@ -2,6 +2,7 @@ package org.lareferencia.embedding.v1.service;
 
 import java.util.Comparator;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
 import org.lareferencia.embedding.v1.dto.CreateStoreRequest;
 import org.lareferencia.embedding.v1.dto.StoreResponse;
 import org.lareferencia.embedding.v1.entity.StoreEntity;
@@ -12,7 +13,6 @@ import org.lareferencia.embedding.v1.repository.EmbeddingRepository;
 import org.lareferencia.embedding.v1.repository.StoreRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -32,11 +32,16 @@ public class StoreService {
       throw new StoreAlreadyExistsException(model, request.dimensions());
     }
     // Database uniqueness, not this preflight, serializes competing creations.
-    StoreEntity store = storeRepository.saveAndFlush(StoreEntity.builder()
-        .name(name).model(model).provider(embeddingProviderService.provider())
-        .embeddingDimension(request.dimensions()).build());
-    embeddingRepository.ensureStoreTableExists(store.getId(), request.dimensions(),
-        Boolean.TRUE.equals(request.createVectorIndex()));
+    StoreEntity store =
+        storeRepository.saveAndFlush(
+            StoreEntity.builder()
+                .name(name)
+                .model(model)
+                .provider(embeddingProviderService.provider())
+                .embeddingDimension(request.dimensions())
+                .build());
+    embeddingRepository.ensureStoreTableExists(
+        store.getId(), request.dimensions(), Boolean.TRUE.equals(request.createVectorIndex()));
     return toResponse(store);
   }
 
@@ -46,8 +51,11 @@ public class StoreService {
       throw new InvalidRequestException("Embedding dimensions must be a positive number");
     }
     if (store.getEmbeddingDimension() != null && store.getEmbeddingDimension() != dimensions) {
-      throw new InvalidRequestException("Embedding dimensions " + dimensions
-          + " do not match the configured store dimensions " + store.getEmbeddingDimension());
+      throw new InvalidRequestException(
+          "Embedding dimensions "
+              + dimensions
+              + " do not match the configured store dimensions "
+              + store.getEmbeddingDimension());
     }
     if (store.getEmbeddingDimension() == null) {
       store.setEmbeddingDimension(dimensions);
@@ -57,8 +65,10 @@ public class StoreService {
   }
 
   public List<StoreResponse> listStores() {
-    return storeRepository.findAll().stream().sorted(Comparator.comparing(StoreEntity::getId))
-        .map(this::toResponse).toList();
+    return storeRepository.findAll().stream()
+        .sorted(Comparator.comparing(StoreEntity::getId))
+        .map(this::toResponse)
+        .toList();
   }
 
   public StoreEntity getRequiredStore(String name) {
@@ -77,7 +87,12 @@ public class StoreService {
   }
 
   private StoreResponse toResponse(StoreEntity store) {
-    return new StoreResponse(store.getId(), store.getName(), store.getModel(), store.getProvider(),
-        store.getEmbeddingDimension(), store.getCreatedAt());
+    return new StoreResponse(
+        store.getId(),
+        store.getName(),
+        store.getModel(),
+        store.getProvider(),
+        store.getEmbeddingDimension(),
+        store.getCreatedAt());
   }
 }

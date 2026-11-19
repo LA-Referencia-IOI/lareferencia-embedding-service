@@ -16,21 +16,23 @@ import org.springframework.transaction.PlatformTransactionManager;
 @Configuration
 @EnableConfigurationProperties(DataSourceProperties.class)
 public class DatabaseConfig {
-  @Bean(name="dataSource", destroyMethod="close")
+  @Bean(name = "dataSource", destroyMethod = "close")
   @Primary
   @ConfigurationProperties("spring.datasource.hikari")
   HikariDataSource dataSource(DataSourceProperties properties) {
     return properties.initializeDataSourceBuilder().type(HikariDataSource.class).build();
   }
 
-  @Bean @Primary
+  @Bean
+  @Primary
   JdbcTemplate jdbcTemplate(@Qualifier("dataSource") DataSource dataSource) {
     return new JdbcTemplate(dataSource);
   }
 
-  @Bean(name="transactionManager") @Primary
-  PlatformTransactionManager transactionManager(EntityManagerFactory factory,
-      @Qualifier("dataSource") DataSource dataSource) {
+  @Bean(name = "transactionManager")
+  @Primary
+  PlatformTransactionManager transactionManager(
+      EntityManagerFactory factory, @Qualifier("dataSource") DataSource dataSource) {
     var manager = new JpaTransactionManager(factory);
     manager.setDataSource(dataSource);
     return manager;

@@ -1,11 +1,9 @@
 package org.lareferencia.embedding.v1.repository;
 
 import java.util.List;
-
+import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-
-import lombok.RequiredArgsConstructor;
 
 @Repository
 @RequiredArgsConstructor
@@ -28,7 +26,8 @@ public class StatusRepository {
   }
 
   public List<EmbeddingTableStats> embeddingTableStats(String schemaName) {
-    String sql = """
+    String sql =
+        """
         SELECT
           c.relname AS table_name,
           pg_relation_size(c.oid) AS table_size_bytes,
@@ -43,13 +42,16 @@ public class StatusRepository {
           AND c.relname LIKE ? ESCAPE '\\'
         ORDER BY c.relname
         """;
-    return jdbcTemplate.query(sql, (rs, rowNum) -> new EmbeddingTableStats(
-        schemaName,
-        rs.getString("table_name"),
-        rs.getLong("table_size_bytes"),
-        rs.getLong("indexes_size_bytes"),
-        rs.getLong("total_size_bytes"),
-        rs.getLong("estimated_rows")),
+    return jdbcTemplate.query(
+        sql,
+        (rs, rowNum) ->
+            new EmbeddingTableStats(
+                schemaName,
+                rs.getString("table_name"),
+                rs.getLong("table_size_bytes"),
+                rs.getLong("indexes_size_bytes"),
+                rs.getLong("total_size_bytes"),
+                rs.getLong("estimated_rows")),
         schemaName,
         "embeddings\\_%");
   }
@@ -60,6 +62,5 @@ public class StatusRepository {
       long tableSizeBytes,
       long indexesSizeBytes,
       long totalSizeBytes,
-      long estimatedRows) {
-  }
+      long estimatedRows) {}
 }

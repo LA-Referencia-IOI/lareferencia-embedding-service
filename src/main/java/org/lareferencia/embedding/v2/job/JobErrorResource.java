@@ -7,4 +7,5 @@ import java.util.UUID;
 
 /** Fixed diagnostic and locator without source content or provider responses. */
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-public record JobErrorResource(String itemKey,UUID documentId,JsonNode locator,String code,String message,int attempts) { }
+public record JobErrorResource(
+    String itemKey, UUID documentId, JsonNode locator, String code, String message, int attempts) {}

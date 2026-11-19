@@ -15,15 +15,20 @@ class MissingIdempotencyHeaderTest {
   @Test
   void namesTheRequiredHeaderWithoutCallingTheService() throws Exception {
     var service = mock(CollectionService.class);
-    var mvc = MockMvcBuilders.standaloneSetup(new CollectionController(service,mock(org.lareferencia.embedding.v2.indexation.IndexationService.class)))
-        .setControllerAdvice(new V2ExceptionHandler())
-        .build();
+    var mvc =
+        MockMvcBuilders.standaloneSetup(
+                new CollectionController(
+                    service, mock(org.lareferencia.embedding.v2.indexation.IndexationService.class)))
+            .setControllerAdvice(new V2ExceptionHandler())
+            .build();
 
-    mvc.perform(post("/api/v2/collections")
-        .contentType(MediaType.APPLICATION_JSON)
-        .content("""
-            {"slug":"brasil-v1","name":"Brasil"}
-            """))
+    mvc.perform(
+            post("/api/v2/collections")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"slug":"brasil-v1","name":"Brasil"}
+                    """))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("invalid_request"))
         .andExpect(jsonPath("$.message").value("Idempotency-Key header is required"));

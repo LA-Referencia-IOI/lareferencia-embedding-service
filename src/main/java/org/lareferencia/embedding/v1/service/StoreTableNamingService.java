@@ -1,7 +1,6 @@
 package org.lareferencia.embedding.v1.service;
 
 import java.util.UUID;
-
 import org.lareferencia.embedding.v1.exception.InvalidRequestException;
 import org.springframework.stereotype.Service;
 

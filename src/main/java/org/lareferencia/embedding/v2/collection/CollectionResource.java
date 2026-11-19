@@ -6,4 +6,4 @@ import java.time.Instant;
 import java.util.UUID;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-public record CollectionResource(UUID id,String slug,String name,Instant createdAt) {}
+public record CollectionResource(UUID id, String slug, String name, Instant createdAt) {}

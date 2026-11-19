@@ -10,16 +10,22 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @Data
 @ConfigurationProperties("app.dvp")
 public class ProviderProperties {
-  private Map<String,Provider> providers=new LinkedHashMap<>();
-  @Data public static class Provider {
+  private Map<String, Provider> providers = new LinkedHashMap<>();
+
+  @Data
+  public static class Provider {
     private String type;
     private String endpoint;
     private String secretRef;
-    private Duration connectTimeout=Duration.ofSeconds(5);
-    private Duration requestTimeout=Duration.ofSeconds(30);
-    private int concurrency=4;
-    private int batchSize=128;
-    private Map<String,String> modelAliases=new LinkedHashMap<>();
-    @Override public String toString() { return "Provider[redacted]"; }
+    private Duration connectTimeout = Duration.ofSeconds(5);
+    private Duration requestTimeout = Duration.ofSeconds(30);
+    private int concurrency = 4;
+    private int batchSize = 128;
+    private Map<String, String> modelAliases = new LinkedHashMap<>();
+
+    @Override
+    public String toString() {
+      return "Provider[redacted]";
+    }
   }
 }
