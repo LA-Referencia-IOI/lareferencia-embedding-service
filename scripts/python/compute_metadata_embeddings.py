@@ -111,13 +111,32 @@ class Encoder:
             "torch": torch.__version__,
         }
 
+    def truncate(self, text):
+        # Offsets keep the original prefix and spacing. Counting again accounts
+        # for token boundaries that can change when the suffix is removed.
+        offsets = self.tokenizer(
+            text, truncation=True, max_length=self.args.max_tokens,
+            add_special_tokens=True, return_offsets_mapping=True,
+        )["offset_mapping"]
+        for end in sorted({end for start, end in offsets if end > start}, reverse=True):
+            prefix = text[:end]
+            count = len(self.tokenizer(prefix, truncation=False, add_special_tokens=True, verbose=False)["input_ids"])
+            if count <= self.args.max_tokens:
+                return prefix, count
+        raise ValueError("El límite no deja espacio para el contenido de la entrada")
+
     def encode(self, texts):
         np = self.np
-        lengths = self.tokenizer(texts, truncation=False, padding=False, add_special_tokens=True)["input_ids"]
+        texts = list(texts)
+        truncated = []
+        lengths = self.tokenizer(texts, truncation=False, padding=False, add_special_tokens=True, verbose=False)["input_ids"]
         counts = [len(ids) for ids in lengths]
         for index, count in enumerate(counts):
             if count > self.args.max_tokens:
-                raise ValueError(f"Entrada {index + 1} del lote supera {self.args.max_tokens} tokens ({count})")
+                if self.args.on_overflow == "error":
+                    raise ValueError(f"Entrada {index + 1} del lote supera {self.args.max_tokens} tokens ({count})")
+                texts[index], counts[index] = self.truncate(texts[index])
+                truncated.append((index, count, counts[index]))
         order = sorted(range(len(texts)), key=counts.__getitem__)
         vectors = np.empty((len(texts), DIMENSIONS), dtype=np.float32)
         start = 0
@@ -142,21 +161,26 @@ class Encoder:
                 raise ValueError("El modelo devolvió una norma inválida")
             vectors[indices] = batch / norms
             start = end
-        return vectors
+        return vectors, truncated
 
 
-def write_batch(stream, encoder, texts, source_file, first_line):
+def write_batch(stream, encoder, texts, source_file, first_line, truncations):
     try:
-        vectors = encoder.encode(texts)
+        vectors, truncated = encoder.encode(texts)
     except (RuntimeError, ValueError) as exc:
         raise ValueError(f"{source_file}, líneas {first_line}–{first_line + len(texts) - 1}: {exc}") from exc
+    for offset, source_tokens, encoded_tokens in truncated:
+        line = first_line + offset
+        truncations.append({"sourceFile": source_file, "sourceLine": line,
+                            "sourceTokens": source_tokens, "encodedTokens": encoded_tokens})
+        LOGGER.info("Recorte de entrada %s:%d (%d → %d tokens)", source_file, line, source_tokens, encoded_tokens)
     for vector in vectors:
         values = (format(value, ".9g") for value in vector.tolist())
         # Nine significant digits round-trip float32. Preserve signed zero too.
         stream.write("[[" + ",".join("-0.0" if value == "-0" else value for value in values) + "]]\n")
 
 
-def write_part(source_path, source_file, destination, index_rows, encoder, args):
+def write_part(source_path, source_file, destination, index_rows, encoder, args, truncations):
     count = with_abstract = 0
     texts = []
     read = gzip.open if source_file.endswith(".gz") else open
@@ -174,10 +198,10 @@ def write_part(source_path, source_file, destination, index_rows, encoder, args)
             with_abstract += has_abstract
             texts.append(text)
             if len(texts) == args.chunk_size:
-                write_batch(output, encoder, texts, source_file, count - len(texts) + 1)
+                write_batch(output, encoder, texts, source_file, count - len(texts) + 1, truncations)
                 texts.clear()
         if texts:
-            write_batch(output, encoder, texts, source_file, count - len(texts) + 1)
+            write_batch(output, encoder, texts, source_file, count - len(texts) + 1, truncations)
     return count, with_abstract
 
 
@@ -211,6 +235,7 @@ def build(args):
         if output.exists():
             raise ValueError(f"Ya existe {output}")
         stage = Path(tempfile.mkdtemp(prefix=f".{output.name}.", dir=output.parent))
+        truncations = []
         encoder = Encoder(args) if parts else None
         with closing(sqlite3.connect(index_path.as_uri() + "?mode=ro&immutable=1", uri=True)) as database:
             foreign = database.execute("SELECT 1 FROM records WHERE export_id != ? OR variant != ? LIMIT 1", (manifest["exportId"], options["variant"])).fetchone()
@@ -228,7 +253,7 @@ def build(args):
                 destination = stage / relative
                 if destination.exists():
                     raise ValueError(f"Colisión de nombres de salida: {relative}")
-                count, abstracts = write_part(source_path, part, destination, rows, encoder, args)
+                count, abstracts = write_part(source_path, part, destination, rows, encoder, args, truncations)
                 total += count
                 with_abstract += abstracts
                 inventory.append({
@@ -246,13 +271,16 @@ def build(args):
                 "variant": options["variant"], "mappingHash": manifest.get("mappingHash"),
             },
             "embeddings": [{
-                "id": "title-abstract", "model": MODEL_ID, "revision": args.revision,
+                "id": args.recipe_id, "model": MODEL_ID, "revision": args.revision,
                 "dimensions": DIMENSIONS, "inferenceDtype": args.dtype, "outputDtype": "float32",
-                "normalization": "l2", "maxTokens": args.max_tokens, "onOverflow": "error",
+                "normalization": "l2", "maxTokens": args.max_tokens, "onOverflow": args.on_overflow,
                 "input": {
                     "titleField": args.title_field, "titleSelection": "first nonblank occurrence, trimmed",
                     "abstractField": args.abstract_field, "abstractQualifierRoot": args.abstract_qualifier,
-                    "abstractSelection": "nonblank occurrences, trimmed, in source order; qualifier root matched case-insensitively",
+                    "abstractSelection": (
+                        "all nonblank occurrences, trimmed, in source order" if args.abstract_qualifier is None else
+                        "nonblank occurrences, trimmed, in source order; qualifier root matched case-insensitively"
+                    ),
                     "abstractSeparator": "\n\n", "fallback": "use title as text", "missingTitle": "none",
                     "documentTemplate": DOCUMENT_TEMPLATE, "queryTemplate": QUERY_TEMPLATE,
                 },
@@ -261,6 +289,9 @@ def build(args):
             "counts": {"records": total, "withAbstract": with_abstract, "titleFallback": total - with_abstract},
             "parts": inventory,
         }
+        if args.on_overflow == "truncate":
+            result["counts"]["truncated"] = len(truncations)
+            result["truncatedInputs"] = truncations
         (stage / "manifest.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         stage.rename(output)
         LOGGER.info("Completo %s (%d registros)", output, total)
@@ -282,6 +313,9 @@ def parse_args():
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", choices=("bfloat16", "float32"), default="bfloat16")
     parser.add_argument("--max-tokens", type=int, default=8192)
+    parser.add_argument("--on-overflow", choices=("error", "truncate"), default="error",
+                        help="Comportamiento al superar max-tokens; truncate registra cada recorte")
+    parser.add_argument("--recipe-id", default="title-abstract", help="Identificador de la receta en el manifiesto")
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--chunk-size", type=int, default=512)
     parser.add_argument("--offline", action="store_true", help="Cargar la revisión solo desde la caché local")
@@ -290,6 +324,8 @@ def parse_args():
         parser.error("--revision debe ser un SHA exacto de 40 caracteres hexadecimales")
     if not (1 <= args.max_tokens <= 8192 and 1 <= args.batch_size <= 16 and args.chunk_size >= 1):
         parser.error("Se requiere 1–8192 tokens, 1–16 documentos por batch y un chunk positivo")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,99}", args.recipe_id):
+        parser.error("--recipe-id debe ser un slug de receta válido")
     args.abstract_qualifier = args.abstract_qualifier.strip().casefold() or None
     return args
 

@@ -31,9 +31,14 @@ orden, las ocurrencias no vacías de `data.descriptions` cuyo primer
 componente del qualifier es `abstract`. Si falta el abstract, usa el título
 también como texto. El modelo recibe `title: {title} | text: {text}` y devuelve
 un vector de 768 dimensiones normalizado en FP32. El límite de entrada es
-8.192 tokens y una secuencia que lo supera provoca un error. Para un perfil
-que exporta los resúmenes a un campo dedicado, usa
-`--abstract-field abstracts --abstract-qualifier ''`.
+8.192 tokens. Por defecto, una secuencia que supera el límite provoca un
+error. Con `--on-overflow truncate`, solo se recortan las entradas largas.
+El manifiesto registra sus archivos, líneas y conteos de tokens antes y
+después del recorte en `truncatedInputs`. El export de origen conserva el
+texto completo. Para un perfil que exporta los resúmenes a un campo dedicado, usa
+`--abstract-field abstracts --abstract-qualifier ''`. Para incluir todas
+las ocurrencias de `descriptions`, usa
+`--abstract-qualifier '' --recipe-id title-descriptions`.
 
 ### Paquete de salida
 
