@@ -461,6 +461,8 @@ Current coverage includes:
 
 ## v2 Collections and upgrades
 
+See the [local EmbeddingGemma API](services/gemma-embeddings/README.md) for OpenAI-compatible text inference.
+
 See the [harvester-to-vector workflow](docs/HARVESTER-EMBEDDINGS.es.md) for the complete export, calculation and import workflow.
 
 See [Python scripts](scripts/python/README.md) for computing embeddings from harvester exports and importing them directly into the v2 PostgreSQL schema. The importer creates or reuses compatible shared indexations and attaches the new collection.
