@@ -71,7 +71,7 @@ public class CollectionController {
   public ResponseEntity<JsonNode> create(
       @RequestBody CreateCollectionRequest request,
       @RequestHeader("Idempotency-Key") String key,
-      @RequestParam MultiValueMap<String, String> query) {
+      @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query) {
     var result = service.create(request, key, query);
     var response = ResponseEntity.status(result.status());
     result.headers().forEach(response::header);
@@ -94,7 +94,8 @@ public class CollectionController {
         description = "Opaque next_cursor from the previous page",
         schema = @Schema(type = "string"))
   })
-  public PageResponse<CollectionResource> list(@RequestParam MultiValueMap<String, String> query) {
+  public PageResponse<CollectionResource> list(
+      @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query) {
     return service.list(query);
   }
 
@@ -109,7 +110,8 @@ public class CollectionController {
         description = "Collection absent",
         content = @Content(schema = @Schema(implementation = V2Error.class)))
   })
-  public CollectionDetails get(@PathVariable String id, @RequestParam MultiValueMap<String, String> query) {
+  public CollectionDetails get(
+      @PathVariable String id, @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query) {
     return service.get(id, query);
   }
 

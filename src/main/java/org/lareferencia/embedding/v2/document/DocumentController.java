@@ -76,7 +76,7 @@ public class DocumentController {
   })
   public ResponseEntity<DocumentResponseBody> patch(
       @PathVariable String collection,
-      @RequestParam MultiValueMap<String, String> query,
+      @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query,
       @RequestBody DocumentWriteRequest request,
       @RequestHeader(value = "If-Match", required = false) String ifMatch,
       @RequestHeader(value = "Idempotency-Key", required = false) String key) {
@@ -109,7 +109,7 @@ public class DocumentController {
   })
   public ResponseEntity<DocumentResponseBody> put(
       @PathVariable String collection,
-      @RequestParam MultiValueMap<String, String> query,
+      @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query,
       @RequestBody DocumentWriteRequest request,
       @RequestHeader(value = "If-Match", required = false) String ifMatch,
       @RequestHeader(value = "Idempotency-Key", required = false) String key) {
@@ -124,14 +124,16 @@ public class DocumentController {
       required = true,
       description = "Case-sensitive external identifier, URL encoded")
   public ResponseEntity<DocumentResource> byExternal(
-      @PathVariable String collection, @RequestParam MultiValueMap<String, String> query) {
+      @PathVariable String collection, @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query) {
     return document(service.getByExternal(collection, query));
   }
 
   @GetMapping("/{id}")
   @Operation(summary = "Get a document by internal UUID")
   public ResponseEntity<DocumentResource> byId(
-      @PathVariable String collection, @PathVariable String id, @RequestParam MultiValueMap<String, String> query) {
+      @PathVariable String collection,
+      @PathVariable String id,
+      @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query) {
     return document(service.getById(collection, id, query));
   }
 
@@ -157,7 +159,7 @@ public class DocumentController {
         schema = @Schema(allowableValues = {"metadata"}))
   })
   public PageResponse<DocumentSummary> list(
-      @PathVariable String collection, @RequestParam MultiValueMap<String, String> query) {
+      @PathVariable String collection, @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query) {
     return service.list(collection, query);
   }
 
@@ -167,7 +169,7 @@ public class DocumentController {
   public ResponseEntity<DocumentResponseBody> delete(
       @PathVariable String collection,
       @PathVariable String id,
-      @RequestParam MultiValueMap<String, String> query,
+      @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query,
       @RequestHeader(value = "If-Match", required = false) String ifMatch,
       @RequestHeader(value = "Idempotency-Key", required = false) String key) {
     return response(service.delete(collection, id, query, false, ifMatch, key));
@@ -190,7 +192,7 @@ public class DocumentController {
   public ResponseEntity<DocumentResponseBody> deleteText(
       @PathVariable String collection,
       @PathVariable String id,
-      @RequestParam MultiValueMap<String, String> query,
+      @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query,
       @RequestHeader(value = "If-Match", required = false) String ifMatch,
       @RequestHeader(value = "Idempotency-Key", required = false) String key) {
     return response(service.delete(collection, id, query, true, ifMatch, key));

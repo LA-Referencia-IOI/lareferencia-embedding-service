@@ -2,6 +2,7 @@ package org.lareferencia.embedding.v2.generation;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import org.lareferencia.embedding.v2.indexation.IndexationBody;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
@@ -36,7 +37,7 @@ public class GenerationController {
       @PathVariable String indexation,
       @RequestBody(required = false) IndexationBody body,
       @RequestHeader("Idempotency-Key") String key,
-      @RequestParam MultiValueMap<String, String> query) {
+      @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query) {
     var result = service.create(collection, indexation, body == null ? null : body.value(), key, query);
     var response = ResponseEntity.status(result.status());
     result.headers().forEach(response::header);

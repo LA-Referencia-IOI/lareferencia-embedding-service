@@ -2,6 +2,7 @@ package org.lareferencia.embedding.v2.search;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import java.util.Map;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.util.MultiValueMap;
@@ -27,7 +28,7 @@ public class SearchController {
       @PathVariable String collection,
       @PathVariable String indexation,
       @RequestBody JsonNode request,
-      @RequestParam MultiValueMap<String, String> query) {
+      @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query) {
     if (!query.isEmpty()) throw org.lareferencia.embedding.v2.common.V2Exception.badRequest("Unknown query parameter");
     return service.search(collection, indexation, request);
   }

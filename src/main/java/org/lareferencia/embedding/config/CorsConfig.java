@@ -15,8 +15,7 @@ import org.springframework.web.filter.CorsFilter;
 public class CorsConfig {
   @Bean
   FilterRegistrationBean<CorsFilter> corsFilter(
-      @Value("${app.cors.allowed-origins:${CORS_ALLOWED_ORIGINS}}")
-          String allowedOrigins) {
+      @Value("${app.cors.allowed-origins:${CORS_ALLOWED_ORIGINS}}") String allowedOrigins) {
     CorsConfiguration cors = new CorsConfiguration();
     cors.setAllowedOrigins(
         Arrays.stream(allowedOrigins.split(",")).map(String::trim).filter(s -> !s.isEmpty()).toList());

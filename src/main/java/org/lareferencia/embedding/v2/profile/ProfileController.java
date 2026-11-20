@@ -48,7 +48,7 @@ public class ProfileController {
   public ResponseEntity<JsonNode> create(
       @RequestBody ProfileRequest request,
       @RequestHeader("Idempotency-Key") String key,
-      @RequestParam MultiValueMap<String, String> query) {
+      @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query) {
     var result = service.create(request, key, query);
     var response = ResponseEntity.status(result.status());
     result.headers().forEach(response::header);
@@ -64,13 +64,15 @@ public class ProfileController {
         schema = @Schema(type = "integer", defaultValue = "100", minimum = "1", maximum = "1000")),
     @Parameter(name = "cursor", in = ParameterIn.QUERY)
   })
-  public PageResponse<ProfileResource> list(@RequestParam MultiValueMap<String, String> query) {
+  public PageResponse<ProfileResource> list(
+      @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query) {
     return service.list(query);
   }
 
   @GetMapping("/{id}")
   @Operation(summary = "Get a profile")
-  public ProfileResource get(@PathVariable String id, @RequestParam MultiValueMap<String, String> query) {
+  public ProfileResource get(
+      @PathVariable String id, @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> query) {
     return service.get(id, query);
   }
 }

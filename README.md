@@ -180,6 +180,9 @@ http://localhost:8989/api-docs
 The active default port is `8989`; override it with `SERVER_PORT` if needed.
 The OpenAPI JSON endpoint is `/api-docs`; `/v3/api-docs` is no longer served.
 Swagger UI groups v2 operations before v1 operations.
+V2 query parameters appear individually in Swagger; unknown query parameters
+remain invalid. This documentation correction does not change API behavior or
+require a database migration or vector reindex.
 
 ### Create a Store
 
