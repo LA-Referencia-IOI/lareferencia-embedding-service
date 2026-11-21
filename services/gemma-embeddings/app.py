@@ -84,7 +84,7 @@ class Gemma:
             if self.model.prompts.get(prompt) != PREFIXES[task]:
                 raise RuntimeError(f"Unexpected model prompt: {prompt}")
 
-    def embed(self, texts):
+    def embed(self, texts, dimensions=DIMENSIONS):
         ids = self.model.tokenizer(texts, truncation=False, add_special_tokens=True, verbose=False)["input_ids"]
         counts = [len(item) for item in ids]
         if any(count > 8192 for count in counts) or sum(counts) > 16384:
@@ -95,6 +95,7 @@ class Gemma:
         ), dtype=self.np.float32)
         if vectors.shape != (len(texts), DIMENSIONS) or not self.np.isfinite(vectors).all():
             raise RuntimeError("Invalid model output")
+        vectors = vectors[:, :dimensions]
         norms = self.np.linalg.norm(vectors, axis=1, keepdims=True)
         if not self.np.isfinite(norms).all() or (norms <= 0).any():
             raise RuntimeError("Invalid vector norms")
@@ -148,8 +149,8 @@ def create_app(loader=Gemma):
             return error(401, "Invalid API key", "invalid_api_key")
         if body.model != MODEL:
             return error(404, "Unknown model", "model_not_found")
-        if body.dimensions not in (None, DIMENSIONS):
-            return error(400, "Only 768 dimensions are supported", "invalid_dimensions")
+        if body.dimensions not in (None, 256, 512, DIMENSIONS):
+            return error(400, "Only 256, 512 and 768 dimensions are supported", "invalid_dimensions")
         inputs = [body.input] if isinstance(body.input, str) else body.input
         if not 1 <= len(inputs) <= 16 or any(not item.strip() for item in inputs) or sum(map(len, inputs)) > 131072:
             return error(400, "Expected 1–16 nonblank texts and at most 131072 characters", "invalid_input")
@@ -157,7 +158,7 @@ def create_app(loader=Gemma):
         if not state.slot.acquire(blocking=False):
             return error(429, "Inference capacity exhausted", "rate_limit_exceeded", retry=True)
         try:
-            vectors, tokens = state.encoder.embed([prefix + item for item in inputs])
+            vectors, tokens = state.encoder.embed([prefix + item for item in inputs], body.dimensions or DIMENSIONS)
         except ValueError:
             return error(400, "Text exceeds model input limits", "invalid_input")
         except Exception:

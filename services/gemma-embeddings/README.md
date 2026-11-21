@@ -1,7 +1,10 @@
 # Servicio local de EmbeddingGemma 2
 
 API de inferencia de texto en FP32 con selección automática de dispositivo. Devuelve un vector normalizado
-de 768 dimensiones por texto en el mismo orden que la solicitud.
+por texto en el mismo orden que la solicitud. El parámetro `dimensions` admite
+768 (valor por defecto), 512 y 256. Para vectores reducidos, el servicio conserva
+las primeras componentes hasta la dimensión solicitada y vuelve a normalizar el vector con norma L2. Usar la misma
+dimensión para indexar documentos y codificar consultas.
 
 ## Ejecutarlo
 
