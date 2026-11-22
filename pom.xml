@@ -144,4 +144,32 @@
 		</plugins>
 	</build>
 
+    <profiles>
+        <profile>
+            <id>frontend</id>
+            <activation><activeByDefault>true</activeByDefault></activation>
+            <build><plugins>
+                <plugin>
+                    <groupId>com.github.eirslett</groupId><artifactId>frontend-maven-plugin</artifactId><version>1.15.1</version>
+                    <configuration><workingDirectory>frontend</workingDirectory><installDirectory>frontend</installDirectory></configuration>
+                    <executions>
+                        <execution><id>install-node-and-corepack</id><goals><goal>install-node-and-corepack</goal></goals><configuration><nodeVersion>v22.16.0</nodeVersion><corepackVersion>0.36.0</corepackVersion></configuration></execution>
+                        <execution><id>frontend-install</id><goals><goal>corepack</goal></goals><configuration><arguments>pnpm install --frozen-lockfile</arguments></configuration></execution>
+                        <execution><id>frontend-typecheck</id><goals><goal>corepack</goal></goals><configuration><arguments>pnpm typecheck</arguments></configuration></execution>
+                        <execution><id>frontend-lint</id><goals><goal>corepack</goal></goals><configuration><arguments>pnpm lint</arguments></configuration></execution>
+                        <execution><id>frontend-test</id><goals><goal>corepack</goal></goals><configuration><arguments>pnpm test</arguments></configuration></execution>
+                        <execution><id>frontend-build</id><goals><goal>corepack</goal></goals><configuration><arguments>pnpm build</arguments></configuration></execution>
+                    </executions>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId><artifactId>maven-resources-plugin</artifactId>
+                    <executions><execution><id>package-frontend</id><phase>prepare-package</phase><goals><goal>copy-resources</goal></goals>
+                        <configuration><outputDirectory>${project.build.outputDirectory}/static</outputDirectory><overwrite>true</overwrite><resources><resource><directory>frontend/dist</directory><filtering>false</filtering></resource></resources></configuration>
+                    </execution></executions>
+                </plugin>
+            </plugins></build>
+        </profile>
+        <profile><id>skip-frontend</id></profile>
+    </profiles>
+
 </project>

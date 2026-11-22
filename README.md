@@ -512,3 +512,34 @@ Restart the API after changing the configuration. CORS allows `Content-Type`, `A
 ### v1 store-name lookup upgrade
 
 Migration `V3__v1_allow_shared_model_dimensions.sql` removes the model/dimension uniqueness constraints without deleting store tables or cached vectors. The `model` field of `POST /api/v1/embeddings` now identifies the store by name, rather than its provider model. Existing clients must update its value whenever the store name differs from the model; this is a semantic compatibility change. Existing store names remain case-insensitively unique. Reindexing is not required. Different store names create separate caches, but using the same provider model name does not itself select different fine-tuned weights: the provider must expose distinct model identifiers for distinct weights. To roll back, first resolve any duplicate model/dimension pairs, restore the old uniqueness constraint and index, and deploy the prior API and clients.
+
+## Integrated React console
+
+The React UI is in `frontend/` and is packaged with the API in the same Spring Boot JAR. Java 21 is required. A full build downloads pinned Node.js and Corepack versions, installs the pnpm version specified by `frontend/package.json` with the lockfile, runs the frontend typecheck, lint, tests and build, and packages the assets:
+
+```bash
+./mvnw clean package
+java -jar target/lareferencia-embedding-service-0.0.1-SNAPSHOT.jar
+```
+
+The backend still requires its database, pgvector, provider and role configuration; see the sections above. Build-time network access to the Node.js, npm and Maven repositories is required on the first build. Node.js and pnpm are not needed to run the resulting JAR. The default API port is 8989 when configured accordingly.
+
+| Route | Resource |
+| --- | --- |
+| `/` and UI routes such as `/search` | React console |
+| `/api/v1/**`, `/api/v2/**` | API |
+| `/api-docs`, `/swagger-ui/**` | OpenAPI and Swagger UI |
+| `/actuator/**` | Existing operational endpoints |
+
+The integrated UI calls relative API paths on the same origin. Existing browser-local API settings are ignored. CORS remains configurable for external clients. For frontend development, start the backend on port 8989, then run:
+
+```bash
+cd frontend
+corepack enable
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+Vite runs on port 8990 and proxies API, Swagger and actuator requests to the backend. To build the backend without the React bundle explicitly, use `./mvnw clean package -Pskip-frontend`; the original backend landing page remains available in that build. The `clean` step ensures assets from an earlier integrated build are not included.
+
+React static assets replace the former root landing page in the integrated JAR; API routes and database schemas are unchanged. To roll back, deploy the previous backend JAR and serve the standalone UI as before. No database migration or vector reindex is required for this integration.
