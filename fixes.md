@@ -1,202 +1,111 @@
-# Correcciones pendientes
+# Code review findings
 
-Fecha de revisión: 2 de noviembre de 2026.
+Review date: November 2, 2026.
 
-Actualización de implementación (4 de noviembre de 2026): las correcciones 1–7
-se implementaron en la fase 1, con regresiones unitarias y pruebas sobre
-PostgreSQL/pgvector. La revisión original que sigue se conserva como historial;
-sus etiquetas «pendiente» y el fallo inicial de locale describen aquella revisión.
-El estado y las aprobaciones actuales están en [el plan](docs/IMPLEMENTATION_PLAN.md)
-y la migración/rollback en [operaciones](docs/phases-1-3-operations.md).
-El código v1 ahora está bajo `org.lareferencia.embedding.v1`.
+Implementation update (November 4, 2026). Phase 1 implemented fixes 1–7 with unit regression tests and PostgreSQL/pgvector tests. The original review below is retained as history. Its pending labels and locale failure reflect the initial review. See the [implementation plan](docs/coding/IMPLEMENTATION_PLAN.md) for current status and approvals and the [operations guide](docs/coding/phases-1-3-operations.md) for migration and rollback. The v1 code now lives under `org.lareferencia.embedding.v1`.
 
-Este documento recoge los problemas identificados en la revisión del código y las
-correcciones propuestas. No implica que los cambios estén implementados. Salvo el
-fallo de pruebas indicado al final, los hallazgos proceden del análisis estático;
-sus escenarios deben cubrirse durante la implementación.
+The original findings came from static analysis except for the test failure reported at the end. Each finding includes a proposed fix and a verification scenario.
 
-## 1. Condición de carrera en los bloqueos por clave
+## 1. Race condition in per-key locks
 
-**Prioridad:** alta. **Estado:** pendiente.
+**Priority:** high. **Original status:** pending.
 
-**Código:** `src/main/java/org/lareferencia/embedding/util/PerKeyLockManager.java`,
-métodos `lockAll` y `LockSet.close`.
+**Code:** `src/main/java/org/lareferencia/embedding/util/PerKeyLockManager.java`, methods `lockAll` and `LockSet.close`.
 
-Al cerrar un conjunto de bloqueos se ejecuta `unlock()` y después se elimina el
-bloqueo del mapa si `hasQueuedThreads()` es falso. Un segundo hilo puede haber
-adquirido ya ese mismo bloqueo sin que queden hilos en espera. Si se elimina la
-entrada, un tercer hilo puede crear otro bloqueo para la misma clave y entrar
-simultáneamente en la sección protegida. También hay una ventana entre obtener
-la referencia del mapa y comenzar a esperar por el bloqueo.
+Closing a lock set calls `unlock()` and removes the lock from the map if `hasQueuedThreads()` is false. A second thread may already have acquired the lock with no threads left waiting. If the entry disappears, a third thread can create another lock for the same key and enter the protected section concurrently. A second race exists between looking up the lock and starting to wait for it.
 
-**Impacto:** llamadas duplicadas al proveedor para el mismo texto y pérdida de la
-garantía de exclusión mutua dentro de una instancia.
+**Impact.** Duplicate provider calls for the same text and loss of mutual exclusion within a service instance.
 
-**Corrección propuesta:** gestionar atómicamente las referencias de propietarios
-y solicitantes antes de retirar una entrada, o utilizar un conjunto fijo de
-bloqueos. Mantener el orden global de adquisición para evitar interbloqueos.
-Los bloqueos locales no coordinan distintas réplicas del servicio.
+**Proposed fix.** Track owners and waiters atomically before removing an entry, or use a fixed set of locks. Keep a global acquisition order to avoid deadlocks. Local locks coordinate threads within an instance.
 
-**Verificación:** añadir una prueba concurrente que fuerce adquisiciones durante
-la liberación y compruebe que nunca hay dos secciones protegidas activas para la
-misma clave. Cubrir también lotes con claves solapadas.
+**Verification.** Force concurrent acquisitions during release and check that only one protected section is active per key. Cover batches with overlapping keys.
 
-## 2. Configuración ausente en una imagen Docker construida desde un checkout limpio
+## 2. Missing Docker configuration in a clean checkout
 
-**Prioridad:** alta. **Estado:** pendiente.
+**Priority:** high. **Original status:** pending.
 
-**Código:** `Dockerfile`, `docker-compose.yml` y
-`src/main/resources/application.example.yml`.
+**Code:** `Dockerfile`, `docker-compose.yml` and `src/main/resources/application.example.yml`.
 
-Spring Boot no carga automáticamente `application.example.yml`. El Dockerfile no
-lo convierte en configuración activa. Variables de Compose como `DB_URL`,
-`DB_USER` o `EMBEDDING_PROVIDER` dependen de los placeholders de ese archivo y no
-equivalen por sí mismas a las propiedades de Spring correspondientes.
+Spring Boot requires an active configuration file. The Dockerfile leaves `application.example.yml` as an example. Compose variables such as `DB_URL`, `DB_USER` and `EMBEDDING_PROVIDER` rely on its placeholders.
 
-**Impacto:** el arranque documentado puede fallar por falta de configuración del
-datasource o ignorar la selección de proveedor. El resultado puede depender de
-que exista un `application.yml` local, que está ignorado por Git.
+**Impact.** The documented startup can fail without datasource configuration or ignore the provider selection. A local, Git-ignored `application.yml` can hide the issue.
 
-**Corrección propuesta:** incorporar una configuración base activa sin secretos,
-cargar explícitamente el archivo de configuración, o cambiar Compose para usar
-variables directamente vinculables, como `SPRING_DATASOURCE_URL`,
-`SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` y
-`APP_EMBEDDING_PROVIDER_TYPE`. Revisar todas las variables publicadas en el README
-y dejar vacía la clave de API por defecto.
+**Proposed fix.** Ship a secret-free base configuration, load the configuration explicitly or use directly bound variables such as `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` and `APP_EMBEDDING_PROVIDER_TYPE`. Review the variables in the README and leave the default API key empty.
 
-**Verificación:** construir y arrancar desde un checkout sin `application.yml`,
-con PostgreSQL disponible y la extensión vector habilitada. Comprobar conexión,
-puerto efectivo y selección del proveedor mediante variables de entorno.
+**Verification.** Build and start from a checkout without `application.yml`, with PostgreSQL and the vector extension available. Verify connectivity, the effective port and provider selection from environment variables.
 
-## 3. Posible mezcla de proveedores en un mismo store
+## 3. Providers can be mixed within a store
 
-**Prioridad:** alta. **Estado:** pendiente.
+**Priority:** high. **Original status:** pending.
 
-**Código:** `EmbeddingService.generateEmbeddings`, `StoreService` y
-`EmbeddingProviderService`.
+**Code:** `EmbeddingService.generateEmbeddings`, `StoreService` and `EmbeddingProviderService`.
 
-El store persiste un proveedor, pero la generación utiliza el proveedor global
-configurado. No se valida que ambos coincidan antes de reutilizar o añadir
-vectores. Tras cambiar el proveedor y reiniciar, un mismo store podría contener
-vectores de procedencias distintas para el mismo modelo y dimensiones.
+A store records a provider, while generation uses the globally configured provider. Reusing or adding vectors does not check that the providers match. After switching providers and restarting, one store can contain vectors from different providers for the same model and dimensions.
 
-**Impacto:** incoherencia del espacio vectorial y respuestas cuyo proveedor
-declarado puede no corresponder al de los vectores recuperados de caché.
+**Impact.** The vector space can become inconsistent and responses can name a provider different from the one that produced cached vectors.
 
-**Corrección propuesta:** definir explícitamente la política. Si solo se admite
-un proveedor activo, rechazar el uso de stores incompatibles. Si se admiten varios,
-resolver el cliente a partir del proveedor persistido y revisar la identidad y
-unicidad del store para incluirlo. Un cambio de proveedor debe requerir un store
-compatible o una migración explícita.
+**Proposed fix.** Define a provider policy. Under a single-provider policy, reject incompatible stores. To support multiple providers, resolve the client from the stored provider and include it in store identity and uniqueness. Changing providers should require a compatible store or an explicit migration.
 
-**Verificación:** crear un store con un proveedor, cambiar la configuración y
-comprobar el comportamiento tanto para aciertos de caché como para textos nuevos.
-Ningún caso debe introducir vectores de otro proveedor silenciosamente.
+**Verification.** Create a store with one provider, change the configuration and verify cache hits and new texts. Reject silent mixing of vectors.
 
-## 4. Caché de stores desalineada con las transacciones y las réplicas
+## 4. Store cache diverges from transactions and replicas
 
-**Prioridad:** media. **Estado:** pendiente.
+**Priority:** medium. **Original status:** pending.
 
-**Código:** `StoreService.createStore`, `loadStoresIntoCache` y
-`EmbeddingRepository.ensureStoreTableExists`.
+**Code:** `StoreService.createStore`, `loadStoresIntoCache` and `EmbeddingRepository.ensureStoreTableExists`.
 
-`createStore` publica el store en memoria antes de que finalice el commit. Si este
-falla, la entrada puede permanecer aunque no exista en la base de datos. El
-repositorio también marca tablas como inicializadas antes del resultado final de
-la transacción que puede contener su creación. Además, los stores se cargan al
-arrancar y los creados por otra instancia no se incorporan a la caché local.
+`createStore` publishes the store in memory before commit. A failed commit can leave a cache entry without a database row. The repository also marks tables initialized before the transaction that creates them completes. Stores are loaded at startup, so stores created on another instance can be missing from the local cache.
 
-**Impacto:** stores fantasma tras un rollback y respuestas 404 en réplicas que aún
-no conocen un store existente. Una tabla revertida podría seguir marcada como
-inicializada en memoria.
+**Impact.** Rollbacks can leave phantom stores or tables marked initialized. Replicas can return 404 for stores created elsewhere.
 
-**Corrección propuesta:** publicar e invalidar el estado en memoria en función del
-resultado de la transacción. Añadir una estrategia de coherencia entre instancias,
-por ejemplo consulta a la base de datos ante un fallo de caché y actualización
-controlada del listado, o invalidación compartida.
+**Proposed fix.** Publish and invalidate cached state according to the transaction outcome. Add cross-instance coherence through database lookups on cache misses and controlled refresh, or shared invalidation.
 
-**Verificación:** provocar un fallo al confirmar la transacción y comprobar que
-no quedan entradas fantasma ni marcas de tablas inexistentes. Con dos instancias,
-crear un store en una y verificar su consulta y uso desde la otra.
+**Verification.** Force a commit failure and check that no phantom entries or table markers remain. Create a store on one instance and retrieve and use it from another.
 
-## 5. Unicidad distinta en memoria y PostgreSQL
+## 5. In-memory and PostgreSQL uniqueness rules differ
 
-**Prioridad:** media. **Estado:** pendiente.
+**Priority:** medium. **Original status:** pending.
 
-**Código:** `StoreService.createStore`, `StoreEntity` y `GlobalExceptionHandler`.
+**Code:** `StoreService.createStore`, `StoreEntity` and `GlobalExceptionHandler`.
 
-La comprobación previa usa `equalsIgnoreCase`, mientras que las restricciones
-declaradas sobre `name` y sobre `(model, embedding_dimension)` no expresan esa
-misma regla. La consulta previa tampoco es atómica con la inserción. Dos
-solicitudes concurrentes pueden superar la validación; las variantes de
-mayúsculas pueden producir stores ambiguos, y una violación de unicidad de la
-base de datos puede terminar como HTTP 500.
+The precheck uses `equalsIgnoreCase`. Database constraints on `name` and `(model, embedding_dimension)` apply different rules. The lookup and insert are separate operations. Concurrent requests can both pass the check, case variants can make stores ambiguous, and uniqueness violations can return HTTP 500.
 
-**Impacto:** reglas inconsistentes, búsquedas ambiguas y errores de servidor para
-conflictos que deberían devolver HTTP 409.
+**Impact.** Inconsistent validation, ambiguous lookups and server errors for conflicts that should return HTTP 409.
 
-**Corrección propuesta:** definir la sensibilidad a mayúsculas de cada identificador
-y aplicar la misma regla en las búsquedas y en restricciones de PostgreSQL. Si se
-mantiene la comparación actual, usar claves normalizadas o índices únicos sobre
-`lower(...)`. Traducir las violaciones de las restricciones pertinentes a 409,
-sin convertir otros errores de integridad en conflictos de duplicados.
+**Proposed fix.** Define case sensitivity per identifier and apply it in lookups and PostgreSQL constraints. For case-insensitive comparison, use normalized keys or unique indexes on `lower(...)`. Return 409 for the relevant uniqueness violations and preserve other integrity errors.
 
-**Verificación:** ejecutar creaciones concurrentes con nombres y pares
-modelo/dimensiones iguales y con variantes de mayúsculas. Debe persistirse una
-sola combinación según la política elegida y devolverse 409 para el duplicado.
+**Verification.** Create stores concurrently with matching names and model/dimension pairs, including case variants. The database should keep one entry per allowed combination and return 409 for duplicates.
 
-## 6. Asociación de embeddings basada en la posición de la respuesta
+## 6. Embeddings are associated by response order
 
-**Prioridad:** media. **Estado:** pendiente.
+**Priority:** medium. **Original status:** pending.
 
-**Código:** `EmbeddingProviderService.toEmbeddingList` y la asociación por hash
-en `EmbeddingService.generateEmbeddings`.
+**Code:** `EmbeddingProviderService.toEmbeddingList` and the hash association in `EmbeddingService.generateEmbeddings`.
 
-El parser recorre `data` en su orden de llegada e ignora el campo `index`. Si un
-proveedor devuelve los elementos desordenados con índices correctos, los vectores
-se asociarán a textos distintos y esa asociación quedará persistida en la caché.
+The parser walks `data` in arrival order and ignores `index`. An out-of-order provider response with valid indexes can associate vectors with the wrong texts and persist those associations in the cache.
 
-**Impacto:** respuestas y caché incorrectas sin un error visible de dimensiones
-o cantidad de resultados.
+**Impact.** Incorrect responses and cache entries even when dimensions and result counts are valid.
 
-**Corrección propuesta:** reconstruir el orden a partir de `index`, comprobando
-su tipo, rango, unicidad y completitud. Definir explícitamente el comportamiento
-para proveedores que no lo incluyan.
+**Proposed fix.** Restore input order using `index` and validate its type, range, uniqueness and completeness. Define behavior for providers that omit it.
 
-**Verificación:** simular respuestas desordenadas, índices duplicados, ausentes
-y fuera de rango. Comprobar la asociación texto/vector tanto en la respuesta
-como en la escritura de caché; rechazar payloads ambiguos como error del proveedor.
+**Verification.** Simulate out-of-order results and duplicate, missing or out-of-range indexes. Check text-to-vector associations in both responses and cache writes. Reject ambiguous payloads as provider errors.
 
-## 7. Formato de tamaños dependiente del locale
+## 7. Size formatting depends on the locale
 
-**Prioridad:** baja. **Estado:** pendiente; reproducido en las pruebas.
+**Priority:** low. **Original status:** pending, reproduced in tests.
 
-**Código:** `StatusService.formatBytes` y
-`StatusServiceTest.combinesSystemAndDatabaseStatus`.
+**Code:** `StatusService.formatBytes` and `StatusServiceTest.combinesSystemAndDatabaseStatus`.
 
-El formateo mediante `"%.2f %s".formatted(...)` utiliza el locale por defecto.
-En el entorno de revisión devuelve `4,00 KiB`, mientras que la prueba espera
-`4.00 KiB`.
+`"%.2f %s".formatted(...)` uses the default locale. In the review environment it returned `4,00 KiB`, while the test expected `4.00 KiB`.
 
-**Corrección propuesta:** usar un locale explícito, por ejemplo
-`String.format(Locale.ROOT, "%.2f %s", value, units[unitIndex])`, para mantener
-estable el formato de la API.
+**Proposed fix.** Use an explicit locale, for example `String.format(Locale.ROOT, "%.2f %s", value, units[unitIndex])`, to keep the API format stable.
 
-**Verificación:** comprobar el resultado con locales español e inglés,
-restaurando el locale original si la prueba modifica el estado global.
+**Verification.** Check the result in Spanish and English locales. Restore the original locale after a test that changes global state.
 
-## Resultado de la validación inicial
+## Initial validation
 
-Se ejecutó `mvn test` con Java 21: **29 pruebas, 28 correctas y 1 fallida**, sin
-errores ni pruebas omitidas. El fallo corresponde al formato de tamaños descrito
-en el punto 7.
+`mvn test` on Java 21 ran **29 tests, with 28 passing and 1 failing**, with no errors or skips. The failure was the size-formatting issue in finding 7.
 
-La cobertura revisada es principalmente unitaria. Para cerrar los puntos
-anteriores hacen falta pruebas específicas de concurrencia e integración con
-PostgreSQL/pgvector, además de comprobar el arranque de Docker desde un checkout
-limpio. No se validaron llamadas contra proveedores reales.
+The initial coverage was mainly unit tests. The original review called for concurrency and PostgreSQL/pgvector integration tests and a container startup check from a clean checkout. It did not exercise real providers.
 
-Orden sugerido de trabajo: configuración de Docker, exclusión mutua, identidad
-del proveedor, coherencia transaccional y entre réplicas, unicidad, orden de
-resultados y formato de tamaños. Cada corrección debe incluir su validación antes
-de marcarse como completada.
+The proposed sequence was Docker configuration, locking, provider identity, transaction and replica coherence, uniqueness, result ordering, and size formatting. Each fix should be validated before it is marked complete.

@@ -1,4 +1,4 @@
-# Scripts Python
+# Python scripts
 
 ## Calculate vectors from prepared texts
 
@@ -26,47 +26,27 @@ complete text. The PostgreSQL import recipe below applies to vectors calculated
 from the original harvester export.
 
 
-Herramientas independientes para preparar datos de intercambio para el servicio de embeddings.
+See the [harvester-to-v2 guide](../../docs/HARVESTER-EMBEDDINGS.md) for the full workflow.
 
-Para el flujo completo, consulta la [guía del cosechador a v2](../../docs/HARVESTER-EMBEDDINGS.es.md).
+## Calculate embeddings from a harvester export
 
-## Calcular embeddings desde una exportación del cosechador
+`compute_metadata_embeddings.py` reads a `COMPLETE` JSONL export and generates a separate vector package with EmbeddingGemma 2.
 
-`compute_metadata_embeddings.py` recibe una exportación JSONL con estado
-`COMPLETE` y genera un paquete separado de vectores con EmbeddingGemma 2.
-
-Usa Python 3.11 o posterior y un entorno con PyTorch, NumPy, Hugging Face Hub,
-Transformers y Sentence Transformers. La prueba de UY usó Python 3.12,
-PyTorch 2.11.0+cu128, Transformers 5.23.0 y Sentence Transformers 6.3.0.
-Para CUDA, usa una distribución de PyTorch compatible con la GPU y el driver.
+Use Python 3.11 or later with PyTorch, NumPy, Hugging Face Hub, Transformers and Sentence Transformers. The UY test used Python 3.12, PyTorch 2.11.0+cu128, Transformers 5.23.0 and Sentence Transformers 6.3.0. For CUDA, choose a PyTorch build compatible with the GPU and driver.
 
 ```bash
 python scripts/python/compute_metadata_embeddings.py \
-  /ruta/exp-del-cosechador \
-  /ruta/emb-uy-title-abstract \
+  /path/to/harvester-export \
+  /path/to/emb-uy-title-abstract \
   --revision f9972ac22e696a105c482202646979e33e4b5a1e \
   --offline
 ```
 
-`--revision` fija el commit exacto del modelo. Con `--offline` debe estar en
-la caché local. La configuración predeterminada usa CUDA y BF16. Para
-ejecutar en CPU, indica `--device cpu --dtype float32`.
+`--revision` pins the exact model commit. With `--offline`, the revision must be in the local cache. CUDA and BF16 are the defaults. For CPU, use `--device cpu --dtype float32`.
 
-La receta toma el primer título no vacío de `data.titles` y concatena, en
-orden, las ocurrencias no vacías de `data.descriptions` cuyo primer
-componente del qualifier es `abstract`. Si falta el abstract, usa el título
-también como texto. El modelo recibe `title: {title} | text: {text}` y devuelve
-un vector de 768 dimensiones normalizado en FP32. El límite de entrada es
-8.192 tokens. Por defecto, una secuencia que supera el límite provoca un
-error. Con `--on-overflow truncate`, solo se recortan las entradas largas.
-El manifiesto registra sus archivos, líneas y conteos de tokens antes y
-después del recorte en `truncatedInputs`. El export de origen conserva el
-texto completo. Para un perfil que exporta los resúmenes a un campo dedicado, usa
-`--abstract-field abstracts --abstract-qualifier ''`. Para incluir todas
-las ocurrencias de `descriptions`, usa
-`--abstract-qualifier '' --recipe-id title-descriptions`.
+The recipe takes the first nonblank `data.titles` value and joins nonblank `data.descriptions` occurrences whose first qualifier component is `abstract`, in source order. If there is no abstract, it uses the title as the body. The model receives `title: {title} | text: {text}` and returns a 768-dimensional vector normalized in FP32. The input limit is 8,192 tokens. The calculator rejects longer inputs by default. Set `--on-overflow truncate` to truncate only oversized inputs. The manifest records their files, lines and token counts before and after truncation in `truncatedInputs`. The source export retains the full text. For a dedicated abstract field, use `--abstract-field abstracts --abstract-qualifier ''`. To use every description, pass `--abstract-qualifier '' --recipe-id title-descriptions`.
 
-### Paquete de salida
+### Output package
 
 ```text
 emb-uy-title-abstract/
@@ -75,30 +55,17 @@ emb-uy-title-abstract/
   UY/part-000002.embeddings.jsonl.gz
 ```
 
-Cada línea contiene únicamente un array de vectores. La posición de cada
-vector corresponde a la misma posición en `embeddings` del manifiesto.
-Este script genera una sola posición, `title-abstract`.
+Each line contains an array of vectors. Vector positions correspond to the positions in `embeddings` in the manifest. This script writes a single position, `title-abstract`.
 
 ```json
 [[0.0312, -0.0187, 0.0048]]
 ```
 
-El ejemplo abrevia el vector. La línea 42 de una parte de vectores corresponde
-a la línea 42 de la parte de metadata indicada en `parts[].sourceFile`.
-El manifiesto registra la identidad de la exportación, el modelo y su
-revisión, los parámetros, la receta, los conteos y los SHA-256 del origen
-y de las partes de salida.
+The example shows an abbreviated vector. Line 42 of a vector part corresponds to line 42 of the metadata part listed in `parts[].sourceFile`. The manifest records the export identity, model and revision, parameters, recipe, counts, and source and output SHA-256 checksums.
 
-El script coteja las líneas con `records.sqlite` en modo lectura y verifica
-la identidad, el hash de metadata y la posición de cada registro. El índice
-permanece en el paquete original. La carpeta final se publica después de
-completar todas las partes y debe ser nueva. Un error aborta la ejecución
-y permite relanzarla desde el comienzo.
+The script opens `records.sqlite` in read-only mode and checks each record's identity, metadata hash and position. The index stays in the original package. Choose a new destination. The calculator publishes it after all parts finish. If an error interrupts the run, rerun it from the beginning.
 
-Este paquete es el formato de intercambio. Para enviarlo a la API de
-importación v2, se deben combinar las partes de metadata y vectores en los
-objetos que acepta el servicio. Consulta la
-[current import guide](../../docs/PLATFORM-GUIDE.md#9-streaming-imports).
+To use the v2 import API, combine the metadata and vector parts into the objects the API accepts. See the [streaming import guide](../../docs/PLATFORM-GUIDE.md#9-streaming-imports).
 
 ## Import a SQLite vector edition into v2
 
@@ -149,14 +116,9 @@ importer verifies the source manifest hash and checks each part, line and
 identity against the SQLite edition. The PostgreSQL load applies the same
 transaction, compatible indexation reuse and reporting as the JSONL import.
 
-## Importar metadata y vectores directamente a PostgreSQL v2
+## Import metadata and vectors directly into v2 PostgreSQL
 
-`import_metadata_embeddings.py` crea una colección nueva a partir del export
-JSONL original y su paquete separado de embeddings. Requiere Python 3.11+,
-PostgreSQL con pgvector y el esquema `dvp` ya migrado por el servicio v2.
-Para la carga, la cuenta necesita permisos de lectura e inserción en las
-tablas de v2, permiso para actualizar el estado de las indexaciones,
-acceso a sus secuencias y permiso para crear tablas e índices en `dvp`. El script no instala extensiones ni ejecuta migraciones.
+`import_metadata_embeddings.py` creates a new collection from the original JSONL export and its separate vector package. It requires Python 3.11+, PostgreSQL with pgvector and the `dvp` schema migrated by the v2 service. The database role needs permission to read and insert into v2 tables, update indexation state, access the sequences and create tables and indexes in `dvp`. Install the extension and apply migrations before importing.
 
 To reuse an indexation created by another database role, the importer also
 needs `INSERT` privileges on its existing `dvp.vec_*` table and the appropriate
@@ -166,41 +128,33 @@ privileges to analyze it. Use the current v2 schema initialized by the service.
 python -m pip install -r scripts/python/requirements-import.txt
 
 python scripts/python/import_metadata_embeddings.py \
-  /ruta/exp-del-cosechador /ruta/emb-uy-title-abstract \
+  /path/to/harvester-export /path/to/emb-uy-title-abstract \
   --collection-slug uy-gemma2 --collection-name "UY · EmbeddingGemma 2" \
   --dry-run
 
-# Configura DATABASE_URL en el entorno con el DSN de PostgreSQL.
+# Set DATABASE_URL in the environment to the PostgreSQL DSN.
 python scripts/python/import_metadata_embeddings.py \
-  /ruta/exp-del-cosechador /ruta/emb-uy-title-abstract \
+  /path/to/harvester-export /path/to/emb-uy-title-abstract \
   --collection-slug uy-gemma2 --collection-name "UY · EmbeddingGemma 2" \
-  --report /ruta/uy-gemma2-import.json
+  --report /path/to/uy-gemma2-import.json
 ```
 
-| Parámetro | Comportamiento |
+| Parameter | Behavior |
 |---|---|
-| `source` | Carpeta del export JSONL v2 `COMPLETE`, con `manifest.json` y `records.sqlite`. |
-| `embeddings` | Carpeta del paquete `metadata-embeddings` v1 `COMPLETE`, con partes JSONL GZIP. |
-| `--collection-slug` | Identificador nuevo de hasta 100 caracteres, en minúsculas, números, guiones o guiones bajos. |
-| `--collection-name` | Nombre visible de hasta 200 caracteres. |
-| `--ann` | `none` por defecto, con búsqueda exacta. `hnsw_vector` crea HNSW con coseno al terminar la carga y admite hasta 2.000 dimensiones. |
-| `--batch-size` | Documentos por lote COPY, de 1 a 1.000. Por defecto 256. Todos los lotes quedan en la misma transacción. |
-| `--dsn-env` | Nombre de la variable con la conexión. Por defecto `DATABASE_URL`. |
-| `--dry-run` | Verifica manifiestos, hashes, alineación, textos y dimensiones. No abre PostgreSQL. |
-| `--report` | Ruta nueva del informe JSON, obligatoria para la carga. Su directorio debe existir. |
+| `source` | Directory of the `COMPLETE` v2 JSONL export with `manifest.json` and `records.sqlite`. |
+| `embeddings` | Directory of the `COMPLETE` v1 `metadata-embeddings` package with GZIP JSONL parts. |
+| `--collection-slug` | New identifier of up to 100 characters using lowercase letters, digits, hyphens or underscores. |
+| `--collection-name` | Display name of up to 200 characters. |
+| `--ann` | Defaults to `none` for exact search. `hnsw_vector` builds a cosine HNSW index after loading and supports up to 2,000 dimensions. |
+| `--batch-size` | Documents per COPY batch, from 1 to 1,000. Defaults to 256. All batches run in a single transaction. |
+| `--dsn-env` | Connection environment variable. Defaults to `DATABASE_URL`. |
+| `--dry-run` | Verifies manifests, hashes, alignment, texts and dimensions without opening PostgreSQL. |
+| `--report` | New JSON report path, required for loading. Its parent directory must exist. |
 
-### Modelo relacional y trazabilidad
+### Relational model and provenance
 
-- Cada documento y su colección de textos se escriben una vez. El
-  `external_id` es el `record_key` de SQLite. La metadata del documento
-  conserva `network`, `catalogId`, `identifier`, `metadataHash` y todo el
-  objeto `data` del export.
-- Se proyectan `titles`, `descriptions`, `abstracts` y `keywords` en
-  `source_texts` como `title`, `description`, `abstract` y `keyword`.
-  En `descriptions`, el primer componente de qualifier `abstract` cambia
-  el tipo a `abstract`. Se conserva el idioma explícito cuando existe.
-  Las ocurrencias en blanco quedan en `data`. Las demás se escriben sin
-  normalización y con las mismas claves y hashes que espera v2.
+- Each document and its texts are written once. Its `external_id` is the SQLite `record_key`. Document metadata preserves `network`, `catalogId`, `identifier`, `metadataHash` and the entire export `data` object.
+- The importer projects `titles`, `descriptions`, `abstracts` and `keywords` into `source_texts` as `title`, `description`, `abstract` and `keyword`. A description whose first qualifier component is `abstract` is stored as an abstract. The importer preserves explicit languages. Blank occurrences stay in `data`. It writes the other occurrences as supplied, with the keys and hashes expected by v2.
 - Each embedding recipe resolves a global indexation by its recipe ID. The
   importer creates it when absent or attaches the new collection to an existing
   ready indexation with the same profile, selection, chunking, cosine metric,
@@ -209,11 +163,7 @@ python scripts/python/import_metadata_embeddings.py \
   Each document has one unit per recipe with that recipe ID as `embedding_key`.
   The `import_only` profile is reused by its v2 fingerprint; search accepts a
   compatible query vector or a text query with a compatible HTTP query profile.
-- El informe conserva el UUID de colección, el perfil e indexación por
-  receta, sus parámetros, los hashes de los manifiestos, el exportId, la
-  variante, los snapshots y los conteos. Conserva ese informe junto con
-  ambos manifiestos. La procedencia compartida queda fuera de la
-  metadata repetida de los documentos.
+- The report records the collection UUID, profile, indexation and settings for each recipe, manifest hashes, export ID, variant, snapshots and counts. Keep it with both manifests. Shared provenance is recorded once in the report.
 
 The report's `reused` field identifies indexations already present before this
 import. Existing vector tables and ANN indexes are retained; imported-vector
@@ -221,9 +171,4 @@ counts are checked for the new collection. Test the importer only against a
 disposable PostgreSQL server using `DVP_PYTHON_TEST_DSN` and
 `python -m unittest discover -s scripts/python/tests -v`.
 
-La carga comprueba `records.sqlite` en modo lectura. Una discrepancia,
-un vector inválido o un error de PostgreSQL revierte la colección y las
-tablas creadas en esa transacción. Un slug existente se rechaza. El informe
-se publica después del commit. Si el commit se confirma y falla la
-publicación del informe, el programa indica la ruta temporal para
-recuperarlo.
+The importer checks `records.sqlite` in read-only mode. A mismatch, invalid vector or PostgreSQL error rolls back the collection and any tables created in that transaction. The importer rejects an existing slug. It publishes the report after commit. If publication fails after commit, the script prints the temporary report path for recovery.

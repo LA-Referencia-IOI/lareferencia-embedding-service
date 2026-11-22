@@ -463,7 +463,7 @@ Current coverage includes:
 
 See the [local EmbeddingGemma API](services/gemma-embeddings/README.md) for OpenAI-compatible text inference.
 
-See the [harvester-to-vector workflow](docs/HARVESTER-EMBEDDINGS.es.md) for the complete export, calculation and import workflow.
+See the [harvester-to-vector workflow](docs/HARVESTER-EMBEDDINGS.md) for the complete export, calculation and import workflow.
 
 See the [Python import guide](scripts/python/README.md#import-a-sqlite-vector-edition-into-v2) to load SQLite vector editions produced by metadata tools into v2 PostgreSQL. The importer also supports paired harvester and JSONL vector packages. It creates or reuses compatible shared indexations and attaches the new collection.
 
