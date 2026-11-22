@@ -77,6 +77,11 @@ posición 0, que el manifiesto identifica como `title-abstract`.
 
 ## 3. Validar e importar
 
+Para las ediciones generadas por metadata tools con `--format sqlite`, seguí
+la [guía de importación directa de SQLite](../scripts/python/README.md#import-a-sqlite-vector-edition-into-v2).
+Los comandos de esta sección usan el export del cosechador y su paquete de
+vectores JSONL.
+
 Prepara un entorno Python 3.11 o posterior. Si cambias de máquina, vuelve
 a definir `META` y `VECTORS` con las rutas de ambas carpetas.
 

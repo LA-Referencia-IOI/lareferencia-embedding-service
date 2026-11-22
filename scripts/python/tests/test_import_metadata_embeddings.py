@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import import_metadata_embeddings as importer
+from test_sqlite_vector_package import create_fixture, write_manifest
 
 
 @unittest.skipUnless(os.getenv("DVP_PYTHON_TEST_DSN"), "Set DVP_PYTHON_TEST_DSN to a disposable PostgreSQL server")
@@ -127,6 +128,53 @@ class SharedIndexImportTest(unittest.TestCase):
         self.assertEqual(1, output["counts"]["texts"])
         with self.psycopg.connect(self.dsn) as conn:
             self.assertEqual(1, conn.execute("SELECT count(*) FROM dvp.collection_indexations WHERE indexation_id=%s AND collection_id=%s", (output["indexations"][0]["id"], output["collection"]["id"])).fetchone()[0])
+
+
+    def test_imports_sqlite_and_rolls_back_invalid_vector(self):
+        root = Path(self.tmp.name)
+        source, edition = create_fixture(root, converted=True)
+        report = root / "sqlite-report.json"
+        collection = "sqlite-" + uuid.uuid4().hex
+        args = [sys.executable, "-B", importer.__file__, str(source), str(edition),
+                "--collection-slug", collection, "--collection-name", "SQLite CLI test",
+                "--dsn-env", "DVP_PYTHON_CASE_DSN", "--report", str(report), "--batch-size", "1"]
+        result = subprocess.run(args, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(report.read_text())
+        self.assertEqual(output["counts"], {"documents": 2, "texts": 2, "blankTextsSkipped": 0, "vectorsPerRecipe": 2})
+        with self.psycopg.connect(self.dsn) as conn:
+            actual = conn.execute("""
+                SELECT d.external_id, d.metadata, s.content
+                FROM dvp.documents d JOIN dvp.source_texts s ON s.document_id=d.id
+                WHERE d.collection_id=%s ORDER BY d.external_id
+            """, (output["collection"]["id"],)).fetchall()
+            self.assertEqual(actual[0], ("AR_1", {"network": "AR", "catalogId": "1"},
+                                         "title: Título | text: Resumen\n\nclave"))
+            table = self.psycopg.sql.Identifier(*output["indexations"][0]["vectorTable"].split("."))
+            actual = conn.execute(self.psycopg.sql.SQL("""
+                SELECT d.external_id, v.embedding::text, v.origin
+                FROM {} v JOIN dvp.documents d ON d.id=v.document_id
+                WHERE d.collection_id=%s ORDER BY d.external_id
+            """).format(table), (output["collection"]["id"],)).fetchall()
+            self.assertEqual(actual, [("AR_1", "[1.25,-0.5]", "imported"), ("BO_1", "[2.25,-0.5]", "imported")])
+
+        db = edition / "embeddings.sqlite"
+        with sqlite3.connect(db) as conn:
+            conn.execute("UPDATE vectors SET vector=? WHERE item=2", (bytes(8),))
+        manifest = edition / "manifest.json"
+        data = json.loads(manifest.read_text())
+        data["files"][0].update(importer.file_entry(db))
+        write_manifest(manifest, data)
+        cancelled = collection + "-invalid"
+        args[args.index(collection)] = cancelled
+        invalid_report = root / "invalid-report.json"
+        args[args.index(str(report))] = str(invalid_report)
+        result = subprocess.run(args, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("zero vector", result.stderr)
+        self.assertFalse(invalid_report.exists())
+        with self.psycopg.connect(self.dsn) as conn:
+            self.assertIsNone(conn.execute("SELECT id FROM dvp.collections WHERE slug=%s", (cancelled,)).fetchone())
 
 
 if __name__ == "__main__":

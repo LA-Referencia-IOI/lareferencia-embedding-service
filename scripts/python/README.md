@@ -100,6 +100,55 @@ importación v2, se deben combinar las partes de metadata y vectores en los
 objetos que acepta el servicio. Consulta la
 [current import guide](../../docs/PLATFORM-GUIDE.md#9-streaming-imports).
 
+## Import a SQLite vector edition into v2
+
+Use the maintained calculator from `lareferencia-metadata-tools` with
+`--format sqlite`, or convert a combined GZIP JSONL vector package with
+`enrichments pack-vectors`. Both commands produce a directory containing
+`embeddings.sqlite` and `manifest.json`. The
+[SQLite interchange contract](https://github.com/LA-Referencia-IOI/lareferencia-metadata-tools/blob/97921d42f9677ba22ac34cc4bfd3110633722fd1/docs/METADATA_ENRICHMENT_PACKAGE.md#pack-calculated-embeddings-in-sqlite)
+describes the schema and the two sets of source references.
+
+Pass the edition directory to the v2 importer. The dry run opens SQLite in
+read-only mode and checks the manifest, database checksum, schema version,
+locators, dimensions and counts. It decodes the little-endian float32 vectors
+and validates each for cosine search. It needs neither PostgreSQL nor the
+metadata-tools or model dependencies.
+
+```sh
+python scripts/python/import_metadata_embeddings.py "$SQLITE_EDITION_DIR" \
+  --collection-slug ar-combined --collection-name "Argentina · Combined" --dry-run
+```
+
+For the actual load, use Python 3.11+ and install the requirements below.
+Set `DATABASE_URL` to a PostgreSQL database with pgvector and the migrated
+v2 schema. Use a new collection slug and report path.
+
+```sh
+python -m pip install -r scripts/python/requirements-import.txt
+
+python scripts/python/import_metadata_embeddings.py "$SQLITE_EDITION_DIR" \
+  --collection-slug ar-combined --collection-name "Argentina · Combined" \
+  --report /path/to/ar-combined-import.json
+```
+
+The SQLite-only import creates one document and one vector per item. Document
+metadata contains `network` and `catalogId`, and the external ID follows
+`network_catalogId`. To store the exact prepared text as a `body` source text,
+pass the original `embedding-inputs` package before the edition directory.
+
+```sh
+python scripts/python/import_metadata_embeddings.py "$PREPARED_DIR" "$SQLITE_EDITION_DIR" \
+  --collection-slug ar-combined --collection-name "Argentina · Combined" --dry-run
+```
+
+The same two-argument form accepts the original harvester JSONL v2 export for
+a SQLite edition calculated directly from that export. It keeps the metadata
+and source-text projection described below. In either paired mode, the
+importer verifies the source manifest hash and checks each part, line and
+identity against the SQLite edition. The PostgreSQL load applies the same
+transaction, compatible indexation reuse and reporting as the JSONL import.
+
 ## Importar metadata y vectores directamente a PostgreSQL v2
 
 `import_metadata_embeddings.py` crea una colección nueva a partir del export

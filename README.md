@@ -465,7 +465,7 @@ See the [local EmbeddingGemma API](services/gemma-embeddings/README.md) for Open
 
 See the [harvester-to-vector workflow](docs/HARVESTER-EMBEDDINGS.es.md) for the complete export, calculation and import workflow.
 
-See [Python scripts](scripts/python/README.md) for computing embeddings from harvester exports and importing them directly into the v2 PostgreSQL schema. The importer creates or reuses compatible shared indexations and attaches the new collection.
+See the [Python import guide](scripts/python/README.md#import-a-sqlite-vector-edition-into-v2) to load SQLite vector editions produced by metadata tools into v2 PostgreSQL. The importer also supports paired harvester and JSONL vector packages. It creates or reuses compatible shared indexations and attaches the new collection.
 
 For a consolidated guide to the platform, end-to-end workflow, API examples and operations, see [Platform Guide](docs/PLATFORM-GUIDE.md). For step-by-step API and import examples, see [Document-to-vector workflows](docs/WORKFLOWS.md).
 
