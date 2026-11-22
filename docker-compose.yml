@@ -34,6 +34,22 @@ services:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
+  gemma-embeddings:
+    profiles: ["gemma"]
+    build: ./services/gemma-embeddings
+    environment:
+      GEMMA_TASK: ${GEMMA_TASK:-raw}
+      GEMMA_DEVICE: ${GEMMA_DEVICE:-auto}
+      GEMMA_REVISION: ${GEMMA_REVISION:-f9972ac22e696a105c482202646979e33e4b5a1e}
+      GEMMA_CPU_THREADS: ${GEMMA_CPU_THREADS:-4}
+      GEMMA_OFFLINE: ${GEMMA_OFFLINE:-false}
+      HF_TOKEN: ${HF_TOKEN:-}
+      GEMMA_API_KEY: ${GEMMA_API_KEY:-}
+    ports:
+      - "127.0.0.1:${GEMMA_PORT:-8000}:8000"
+    volumes:
+      - gemma-model-cache:/cache/huggingface
+
   postgres:
     image: pgvector/pgvector:0.8.0-pg16
     container_name: embedding-postgres
@@ -61,3 +77,4 @@ services:
 volumes:
   postgres-data:
   import-data:
+  gemma-model-cache:

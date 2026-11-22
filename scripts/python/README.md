@@ -1,5 +1,31 @@
 # Scripts Python
 
+## Calculate vectors from prepared texts
+
+The shell's `prepare-embedding-metadata --combine` command produces an
+`embedding-inputs` v1 package with one text per record. Run the same batch
+calculator used for harvester exports.
+
+```sh
+python scripts/python/compute_metadata_embeddings.py "$PREPARED_DIR" "$VECTOR_DIR" \
+  --revision "$MODEL_REVISION"
+```
+
+The calculator reads the manifest's ordered `parts`, verifies their sizes and
+SHA-256 checksums and sends each row's `text` to the encoder. The shell has
+already applied the model's document template. When the shell includes a
+provenance sidecar, it remains available for auditing in the input package.
+
+This mode emits an `embedding-vectors` v1 package. Each GZIP JSONL row contains
+`network`, `catalogId` and a numeric `vector`. The vector manifest lists the
+corresponding input part and output part, the model revision and dimensions,
+and the number of rows. The default overflow policy truncates the encoder input
+and reports the input part, line, original token count and final token count.
+Set `--on-overflow error` to reject long inputs. The prepared package retains the
+complete text. The PostgreSQL import recipe below applies to vectors calculated
+from the original harvester export.
+
+
 Herramientas independientes para preparar datos de intercambio para el servicio de embeddings.
 
 Para el flujo completo, consulta la [guía del cosechador a v2](../../docs/HARVESTER-EMBEDDINGS.es.md).

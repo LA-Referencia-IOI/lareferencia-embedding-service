@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compute embeddings for a metadata export and write an aligned JSONL vector package."""
+"""Compute embeddings from a metadata export or a package of prepared texts."""
 from __future__ import annotations
 
 import argparse
@@ -11,7 +11,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
-from contextlib import closing
+from contextlib import closing, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
@@ -164,7 +164,7 @@ class Encoder:
         return vectors, truncated
 
 
-def write_batch(stream, encoder, texts, source_file, first_line, truncations):
+def write_batch(stream, encoder, texts, source_file, first_line, truncations, identities):
     try:
         vectors, truncated = encoder.encode(texts)
     except (RuntimeError, ValueError) as exc:
@@ -174,35 +174,63 @@ def write_batch(stream, encoder, texts, source_file, first_line, truncations):
         truncations.append({"sourceFile": source_file, "sourceLine": line,
                             "sourceTokens": source_tokens, "encodedTokens": encoded_tokens})
         LOGGER.info("Recorte de entrada %s:%d (%d → %d tokens)", source_file, line, source_tokens, encoded_tokens)
-    for vector in vectors:
-        values = (format(value, ".9g") for value in vector.tolist())
-        # Nine significant digits round-trip float32. Preserve signed zero too.
-        stream.write("[[" + ",".join("-0.0" if value == "-0" else value for value in values) + "]]\n")
+    for index, vector in enumerate(vectors):
+        if identities is None:
+            # Nine significant digits round-trip float32. Preserve signed zero too.
+            values = (format(value, ".9g") for value in vector.tolist())
+            stream.write("[[" + ",".join("-0.0" if value == "-0" else value for value in values) + "]]\n")
+        else:
+            network, catalog_id = identities[index]
+            record = {"network": network, "catalogId": catalog_id, "vector": vector.tolist()}
+            stream.write(json.dumps(record, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n")
 
 
 def write_part(source_path, source_file, destination, index_rows, encoder, args, truncations):
     count = with_abstract = 0
     texts = []
+    identities = [] if index_rows is None else None
     read = gzip.open if source_file.endswith(".gz") else open
     destination.parent.mkdir(parents=True, exist_ok=True)
     with read(source_path, "rt", encoding="utf-8") as source, gzip.open(destination, "wt", encoding="utf-8", compresslevel=3) as output:
         for count, line in enumerate(source, 1):
             try:
                 record = json.loads(line)
-                identity = (source_file, count, record["network"], record["catalogId"], record["identifier"], record["metadataHash"])
-                if next(index_rows, None) != identity:
-                    raise ValueError("La posición, identidad o hash no coincide con records.sqlite")
-                text, has_abstract = input_text(record, args)
+                if identities is None:
+                    identity = (source_file, count, record["network"], record["catalogId"], record["identifier"], record["metadataHash"])
+                    if next(index_rows, None) != identity:
+                        raise ValueError("La posición, identidad o hash no coincide con records.sqlite")
+                    text, has_abstract = input_text(record, args)
+                    with_abstract += has_abstract
+                else:
+                    identity = (record["network"], record["catalogId"])
+                    text = record["text"]
+                    if not all(isinstance(value, str) and value.strip() for value in (*identity, text)):
+                        raise ValueError("Expected nonblank network, catalogId and text")
+                    identities.append(identity)
             except (ValueError, KeyError, TypeError) as exc:
                 raise ValueError(f"{source_file}:{count}: {exc}") from exc
-            with_abstract += has_abstract
             texts.append(text)
             if len(texts) == args.chunk_size:
-                write_batch(output, encoder, texts, source_file, count - len(texts) + 1, truncations)
+                write_batch(output, encoder, texts, source_file, count - len(texts) + 1, truncations, identities)
                 texts.clear()
+                if identities is not None:
+                    identities.clear()
         if texts:
-            write_batch(output, encoder, texts, source_file, count - len(texts) + 1, truncations)
+            write_batch(output, encoder, texts, source_file, count - len(texts) + 1, truncations, identities)
     return count, with_abstract
+
+
+def indexed_rows(database, manifest):
+    if database is None:
+        return None
+    foreign = database.execute("SELECT 1 FROM records WHERE export_id != ? OR variant != ? LIMIT 1",
+                               (manifest["exportId"], manifest["options"]["variant"])).fetchone()
+    if foreign is not None:
+        raise ValueError("El SQLite no corresponde a la exportación o variante")
+    return iter(database.execute(
+        "SELECT file, position, network, catalog_id, identifier, metadata_hash "
+        "FROM records WHERE status = 'EXPORTED' ORDER BY file COLLATE BINARY, position"
+    ))
 
 
 def build(args):
@@ -213,19 +241,40 @@ def build(args):
     manifest_path = package_file(source, "manifest.json")
     manifest_bytes = manifest_path.read_bytes()
     manifest = json.loads(manifest_bytes)
-    if manifest.get("status") != "COMPLETE" or manifest.get("options", {}).get("format") != "jsonl":
-        raise ValueError("Se requiere una exportación JSONL con estado COMPLETE")
+    prepared = manifest.get("packageType") == "embedding-inputs"
+    if manifest.get("status") != "COMPLETE":
+        raise ValueError("Expected a COMPLETE input package")
     files = {entry["path"]: entry for entry in manifest["files"]}
     if len(files) != len(manifest["files"]):
-        raise ValueError("Rutas duplicadas en el manifiesto")
-    parts = sorted(name for name in files if name.endswith((".jsonl.gz", ".jsonl")) and name != "errors.jsonl")
-    index_path = verify_file(source, files["records.sqlite"])
-    options = manifest["options"]
-    if "mapping.json" in files:
-        mapping = json.loads(verify_file(source, files["mapping.json"]).read_text(encoding="utf-8"))
-        for field in (args.title_field, args.abstract_field):
-            if field not in mapping["fields"]:
-                raise ValueError(f"El perfil de origen no declara data.{field}")
+        raise ValueError("Duplicate paths in input manifest")
+    if prepared:
+        if manifest["contractVersion"] != 1:
+            raise ValueError("Unsupported embedding-inputs contract version")
+        parts = manifest["parts"]
+        if (not isinstance(parts, list) or len(set(parts)) != len(parts)
+                or any(not part.endswith(".jsonl.gz") or part == "provenance.jsonl.gz" or part not in files for part in parts)):
+            raise ValueError("Invalid embedding-inputs parts")
+        expected = manifest["counts"]["emitted"]
+        if type(expected) is not int or expected < 0:
+            raise ValueError("Invalid embedding-inputs count")
+        index_path = None
+    else:
+        if manifest.get("options", {}).get("format") != "jsonl":
+            raise ValueError("Expected a JSONL metadata export")
+        parts = sorted(name for name in files if name.endswith((".jsonl.gz", ".jsonl")) and name != "errors.jsonl")
+        expected = manifest["counts"]["exported"]
+        index_path = verify_file(source, files["records.sqlite"])
+        if "mapping.json" in files:
+            mapping = json.loads(verify_file(source, files["mapping.json"]).read_text(encoding="utf-8"))
+            for field in (args.title_field, args.abstract_field):
+                if field not in mapping["fields"]:
+                    raise ValueError(f"El perfil de origen no declara data.{field}")
+    if args.on_overflow is None:
+        args.on_overflow = "truncate" if prepared else "error"
+    if args.recipe_id is None:
+        args.recipe_id = manifest["recipe"] if prepared else "title-abstract"
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,99}", args.recipe_id):
+        raise ValueError("Invalid embedding recipe ID")
 
     output.parent.mkdir(parents=True, exist_ok=True)
     lock = output.with_name(f".{output.name}.lock")
@@ -237,14 +286,9 @@ def build(args):
         stage = Path(tempfile.mkdtemp(prefix=f".{output.name}.", dir=output.parent))
         truncations = []
         encoder = Encoder(args) if parts else None
-        with closing(sqlite3.connect(index_path.as_uri() + "?mode=ro&immutable=1", uri=True)) as database:
-            foreign = database.execute("SELECT 1 FROM records WHERE export_id != ? OR variant != ? LIMIT 1", (manifest["exportId"], options["variant"])).fetchone()
-            if foreign is not None:
-                raise ValueError("El SQLite no corresponde a la exportación o variante")
-            rows = iter(database.execute(
-                "SELECT file, position, network, catalog_id, identifier, metadata_hash "
-                "FROM records WHERE status = 'EXPORTED' ORDER BY file COLLATE BINARY, position"
-            ))
+        index = closing(sqlite3.connect(index_path.as_uri() + "?mode=ro&immutable=1", uri=True)) if index_path else nullcontext()
+        with index as database:
+            rows = indexed_rows(database, manifest)
             inventory = []
             total = with_abstract = 0
             for part in parts:
@@ -261,20 +305,22 @@ def build(args):
                     "file": relative, "records": count, **file_entry(destination),
                 })
                 LOGGER.info("%s %d registros", relative, count)
-            if next(rows, None) is not None or total != manifest["counts"]["exported"]:
-                raise ValueError("La cantidad de filas no coincide entre el SQLite, los JSONL y el manifiesto")
+            if total != expected or (rows is not None and next(rows, None) is not None):
+                raise ValueError("Input record counts do not reconcile")
         result = {
-            "formatVersion": 1, "type": "metadata-embeddings", "status": "COMPLETE",
+            "formatVersion": 1, "type": "embedding-vectors" if prepared else "metadata-embeddings", "status": "COMPLETE",
             "createdAt": datetime.now(timezone.utc).isoformat(), "format": "jsonl", "compression": "gzip",
-            "source": {
+            "source": {"packageId": manifest["packageId"], "manifestSha256": "sha256:" + hashlib.sha256(manifest_bytes).hexdigest()}
+            if prepared else {
                 "exportId": manifest["exportId"], "manifestSha256": "sha256:" + hashlib.sha256(manifest_bytes).hexdigest(),
-                "variant": options["variant"], "mappingHash": manifest.get("mappingHash"),
+                "variant": manifest["options"]["variant"], "mappingHash": manifest.get("mappingHash"),
             },
             "embeddings": [{
                 "id": args.recipe_id, "model": MODEL_ID, "revision": args.revision,
                 "dimensions": DIMENSIONS, "inferenceDtype": args.dtype, "outputDtype": "float32",
                 "normalization": "l2", "maxTokens": args.max_tokens, "onOverflow": args.on_overflow,
-                "input": {
+                "input": {"textField": "text", "preparationRecipe": manifest["recipe"], "queryTemplate": QUERY_TEMPLATE}
+                if prepared else {
                     "titleField": args.title_field, "titleSelection": "first nonblank occurrence, trimmed",
                     "abstractField": args.abstract_field, "abstractQualifierRoot": args.abstract_qualifier,
                     "abstractSelection": (
@@ -286,7 +332,7 @@ def build(args):
                 },
             }],
             "runtime": {"device": args.device, "batchSizeLimit": args.batch_size, **(encoder.versions if encoder else {})},
-            "counts": {"records": total, "withAbstract": with_abstract, "titleFallback": total - with_abstract},
+            "counts": {"records": total} if prepared else {"records": total, "withAbstract": with_abstract, "titleFallback": total - with_abstract},
             "parts": inventory,
         }
         if args.on_overflow == "truncate":
@@ -313,9 +359,9 @@ def parse_args():
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", choices=("bfloat16", "float32"), default="bfloat16")
     parser.add_argument("--max-tokens", type=int, default=8192)
-    parser.add_argument("--on-overflow", choices=("error", "truncate"), default="error",
-                        help="Comportamiento al superar max-tokens; truncate registra cada recorte")
-    parser.add_argument("--recipe-id", default="title-abstract", help="Identificador de la receta en el manifiesto")
+    parser.add_argument("--on-overflow", choices=("error", "truncate"),
+                        help="Token overflow policy (default: truncate for prepared texts, error for metadata exports)")
+    parser.add_argument("--recipe-id", help="Recipe ID for the output manifest (default: input recipe or title-abstract)")
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--chunk-size", type=int, default=512)
     parser.add_argument("--offline", action="store_true", help="Cargar la revisión solo desde la caché local")
@@ -324,7 +370,7 @@ def parse_args():
         parser.error("--revision debe ser un SHA exacto de 40 caracteres hexadecimales")
     if not (1 <= args.max_tokens <= 8192 and 1 <= args.batch_size <= 16 and args.chunk_size >= 1):
         parser.error("Se requiere 1–8192 tokens, 1–16 documentos por batch y un chunk positivo")
-    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,99}", args.recipe_id):
+    if args.recipe_id is not None and not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,99}", args.recipe_id):
         parser.error("--recipe-id debe ser un slug de receta válido")
     args.abstract_qualifier = args.abstract_qualifier.strip().casefold() or None
     return args
@@ -335,7 +381,7 @@ def main():
     args = parse_args()
     try:
         build(args)
-    except (OSError, ValueError, KeyError, TypeError, RuntimeError, ImportError, sqlite3.Error) as exc:
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, ImportError, sqlite3.Error, EOFError) as exc:
         LOGGER.error("%s", exc)
         return 1
     return 0
