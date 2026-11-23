@@ -500,7 +500,7 @@ curl -i -X PUT "$BASE/api/v2/indexations/$I/collections/$OTHER_C"
 
 ## Optional: build or verify the ANN index
 
-**Prerequisites:** the indexation is ready, uses `hnsw_vector` or `hnsw_halfvec`, and a worker is enabled. First check its state:
+**Prerequisites:** the indexation is ready, the collection is attached, and a worker is enabled. First check its state:
 
 ```bash
 curl "$BASE/api/v2/collections/$C/indexations/$I"
@@ -514,6 +514,8 @@ curl -i -X POST "$BASE/api/v2/collections/$C/indexations/$I/maintenance-jobs" \
   -H 'Idempotency-Key: workflow-build-ann-001' \
   -d '{"operation":"build_ann"}'
 ```
+
+For an existing indexation whose strategy is `none`, add the desired strategy to the request body instead: `{"operation":"build_ann","ann_strategy":"hnsw_vector"}`. This changes the shared indexation for all attached collections and builds the index over its existing vectors; it does not regenerate or reimport them. Exact search remains available during the build. See the [Platform Guide](PLATFORM-GUIDE.md) for dimensional limits and failure recovery.
 
 **Expected:** 202 with a job ID. Poll `/api/v2/jobs/{id}` and confirm `ann_state: "ready"` on the indexation before using `"mode":"approximate"` in the search request. Approximate search reports `recall_guaranteed: false` and can return `candidate_limit` on a shortfall; it does not silently fall back to exact mode. Index builds can consume substantial disk and WAL.
 

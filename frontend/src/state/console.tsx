@@ -51,7 +51,6 @@ function useConsoleState() {
   const [conflict, setConflict] = useState(false)
   const [queryText, setQueryText] = useState('')
   const [queryProfile, setQueryProfile] = useState('')
-  const [mode, setMode] = useState('exact')
   const [top, setTop] = useState(10)
   const [group, setGroup] = useState('document')
   const [includeTexts, setIncludeTexts] = useState(true)
@@ -215,11 +214,11 @@ function useConsoleState() {
     (c) => !activeIndex?.collection_ids || activeIndex.collection_ids.includes(c.id),
   )
   const nav = [
+    'search',
     'collections',
     'imports',
     'indexations',
     'profiles',
-    'search',
     'vectors',
     'jobs',
     'legacy',
@@ -311,8 +310,6 @@ function useConsoleState() {
     setQueryText,
     queryProfile,
     setQueryProfile,
-    mode,
-    setMode,
     top,
     setTop,
     group,

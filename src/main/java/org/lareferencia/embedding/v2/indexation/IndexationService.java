@@ -205,10 +205,14 @@ public class IndexationService {
       String collection, String id, JsonNode body, String key, MultiValueMap<String, String> query) {
     requireQuery(query, Set.of());
     UUID c = uuid(collection), i = uuid(id);
-    object(body, Set.of("operation"));
+    object(body, Set.of("operation", "ann_strategy"));
     String operation = text(body, "operation", null);
     if (operation == null || !Set.of("reconcile", "build_ann").contains(operation))
       throw V2Exception.badRequest("Invalid maintenance operation");
+    String requestedStrategy = text(body, "ann_strategy", null);
+    if (requestedStrategy != null
+        && (!operation.equals("build_ann") || !Set.of("hnsw_vector", "hnsw_halfvec").contains(requestedStrategy)))
+      throw V2Exception.badRequest("Invalid ANN strategy for maintenance operation");
     String route = path(c) + "/" + i + "/maintenance-jobs";
     return idempotency.execute(
         "POST " + route,
@@ -216,12 +220,19 @@ public class IndexationService {
         canonical.requestHash(query, body),
         () -> {
           JsonNode index = fetch(write, c, i);
-          if (operation.equals("build_ann")
-              && (index.path("ann_strategy").asText().equals("none") || !index.path("state").asText().equals("ready")))
-            throw new V2Exception(409, "ann_build_unavailable", "Index configuration is not ready for an ANN build");
+          if (operation.equals("build_ann")) {
+            String current = index.path("ann_strategy").asText();
+            if (!index.path("state").asText().equals("ready") || (current.equals("none") && requestedStrategy == null))
+              throw new V2Exception(409, "ann_build_unavailable", "Index configuration is not ready for an ANN build");
+            if (requestedStrategy != null && !current.equals("none") && !current.equals(requestedStrategy))
+              throw new V2Exception(409, "ann_strategy_conflict", "Indexation already uses a different ANN strategy");
+            validateDimensions(requestedStrategy == null ? current : requestedStrategy, index.path("profile").path("dimensions").asInt());
+          }
+          ObjectNode parameters = mapper.createObjectNode().put("operation", operation);
+          if (requestedStrategy != null) parameters.put("ann_strategy", requestedStrategy);
           var job =
               jobs.insert(
-                  UUID.randomUUID(), c, i, null, "maintenance", mapper.createObjectNode().put("operation", operation));
+                  UUID.randomUUID(), c, i, null, "maintenance", parameters);
           ObjectNode response =
               mapper
                   .createObjectNode()

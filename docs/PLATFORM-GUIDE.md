@@ -441,7 +441,7 @@ curl -i -X PUT "$BASE/api/v2/collections/$C/indexations/$I"
 
 ### `POST /api/v2/collections/{c}/indexations/{i}/maintenance-jobs`
 
-`build_ann` constructs HNSW if needed. `reconcile` checks and reconciles physical structures. The response `Location` identifies the job.
+`build_ann` constructs HNSW if needed. For an existing indexation with `ann_strategy: none`, specify `ann_strategy` as `hnsw_vector` or `hnsw_halfvec` to enable and build it without reimporting vectors. The worker changes the strategy while holding the indexation maintenance lock, then builds the index concurrently. Exact search remains available; approximate search is available only after `ann_state` becomes `ready`. `reconcile` checks and reconciles physical structures. The response `Location` identifies the job.
 
 Request:
 
@@ -451,13 +451,23 @@ curl -i -X POST "$BASE/api/v2/collections/$C/indexations/$I/maintenance-jobs" \
   -d '{"operation":"build_ann"}'
 ```
 
+To enable HNSW on an existing indexation whose strategy is `none`:
+
+```bash
+curl -i -X POST "$BASE/api/v2/collections/$C/indexations/$I/maintenance-jobs" \
+  -H 'Content-Type: application/json' -H 'Idempotency-Key: enable-hnsw-001' \
+  -d '{"operation":"build_ann","ann_strategy":"hnsw_vector"}'
+```
+
+The collection must already be attached to the indexation. The strategy applies to the shared indexation and thus all attached collections. Poll the returned job and the indexation's `ann_state`; retries after failure require a new idempotency key. A failed or interrupted concurrent index build may leave an invalid PostgreSQL index requiring operator repair; inspect the job and database before retrying. A configured HNSW strategy cannot be switched to another through this operation. After enabling HNSW, subsequent imports that reuse the indexation must specify the matching ANN strategy; for `scripts/python/import_metadata_embeddings.py`, pass `--ann hnsw_vector` when that strategy was selected.
+
 Example response **202** (fields may be omitted here for brevity):
 
 ```json
 {"id":"66666666-6666-4666-8666-666666666666","kind":"maintenance","status":"queued"}
 ```
 
-Metrics: `cosine`, `l2`, `inner_product`. Strategies: `hnsw_vector` up to 2000 dimensions, `hnsw_halfvec` up to 4000, or `none` for exact access up to 16000. Float32 remains the stored representation. `build_ann` requires a ready indexation and a strategy other than `none`; if its index is already valid and ready, the operation does not force a rebuild. Builds consume disk and WAL.
+Metrics: `cosine`, `l2`, `inner_product`. Strategies: `hnsw_vector` up to 2000 dimensions, `hnsw_halfvec` up to 4000, or `none` for exact access up to 16000. Float32 remains the stored representation. `build_ann` requires a ready indexation; when its strategy is `none`, the request must select a supported strategy. If its index is already valid and ready, the operation does not force a rebuild. Builds consume CPU, memory, disk and WAL. No schema migration, vector regeneration or reimport is needed. On rollback, exact search continues with the previous application; enabling a different ANN strategy on the same indexation is not supported by this operation.
 
 ## 9. Streaming imports
 

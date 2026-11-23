@@ -41,7 +41,9 @@ public class IndexMaintenanceHandler implements JobHandler {
   }
 
   public JsonNode publicParameters(JsonNode internal) {
-    return mapper.createObjectNode().put("operation", internal.path("operation").asText());
+    var result = mapper.createObjectNode().put("operation", internal.path("operation").asText());
+    if (internal.has("ann_strategy")) result.put("ann_strategy", internal.path("ann_strategy").asText());
+    return result;
   }
 
   private record Index(UUID id, int dims, String table, String metric, String strategy, String state) {}
@@ -78,7 +80,7 @@ public class IndexMaintenanceHandler implements JobHandler {
           switch (operation) {
             case "provision" -> provision(lease, index);
             case "reconcile" -> reconcile(lease, index, connection);
-            case "build_ann" -> build(lease, index, connection);
+            case "build_ann" -> build(lease, activateStrategy(lease, index, job.parameters()), connection);
             default -> throw new IllegalStateException("Invalid maintenance operation");
           }
         } catch (Exception failure) {
@@ -89,7 +91,11 @@ public class IndexMaintenanceHandler implements JobHandler {
                 if (operation.equals("provision"))
                   write.update("UPDATE dvp.indexations SET state='failed' WHERE id=?", id);
                 if (operation.equals("build_ann"))
-                  write.update("UPDATE dvp.indexations SET ann_state='failed' WHERE id=?", id);
+                  write.update(
+                      "UPDATE dvp.indexations SET ann_state='failed' WHERE id=? AND ann_strategy<>'none' AND (?::text IS NULL OR ann_strategy=?)",
+                      id,
+                      job.parameters().has("ann_strategy") ? job.parameters().path("ann_strategy").asText() : null,
+                      job.parameters().has("ann_strategy") ? job.parameters().path("ann_strategy").asText() : null);
               });
             } catch (JobRepository.LeaseLostException ignored) {
             }
@@ -136,6 +142,27 @@ public class IndexMaintenanceHandler implements JobHandler {
 
   private void complete(JobRepository.Lease lease) {
     write.update("UPDATE dvp.jobs SET checkpoint=jsonb_build_object('exhausted',true) WHERE id=?", lease.jobId());
+  }
+
+  private Index activateStrategy(JobRepository.Lease lease, Index index, JsonNode parameters) {
+    if (!parameters.has("ann_strategy")) return index;
+    String requested = parameters.path("ann_strategy").asText();
+    if (!java.util.Set.of("hnsw_vector", "hnsw_halfvec").contains(requested)
+        || (requested.equals("hnsw_vector") && index.dims() > 2000)
+        || (requested.equals("hnsw_halfvec") && index.dims() > 4000))
+      throw new IllegalStateException("Invalid ANN strategy");
+    writes.executeWithoutResult(tx -> {
+      fence(lease);
+      int changed = write.update(
+          "UPDATE dvp.indexations SET ann_strategy=?,ann_state='pending' WHERE id=? AND state='ready' AND ann_strategy='none'",
+          requested, index.id());
+      if (changed == 0) {
+        Index current = load(index.id());
+        if (!current.state().equals("ready") || !current.strategy().equals(requested))
+          throw new IllegalStateException("ANN strategy changed concurrently");
+      }
+    });
+    return load(index.id());
   }
 
   private void provision(JobRepository.Lease lease, Index x) {

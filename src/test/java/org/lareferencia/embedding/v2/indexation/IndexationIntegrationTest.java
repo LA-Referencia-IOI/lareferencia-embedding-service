@@ -25,7 +25,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 @EnabledIfEnvironmentVariable(named = "DVP_TEST_DB_URL", matches = ".+")
-@SpringBootTest(properties = {"spring.config.location=classpath:/application.properties", "app.dvp.enabled=true"})
+@SpringBootTest(properties = {"spring.config.location=classpath:/application.properties", "app.dvp.enabled=true", "app.dvp.workers-enabled=false"})
 @AutoConfigureMockMvc
 class IndexationIntegrationTest {
   @DynamicPropertySource
@@ -198,6 +198,82 @@ class IndexationIntegrationTest {
         .andExpect(status().isBadRequest());
     mvc.perform(get("/api/v2/indexations").param("collection_id", UUID.randomUUID().toString()))
         .andExpect(status().isNotFound());
+  }
+
+  @Test
+  void enablesAnnOnExistingIndexationWithoutReplacingVectors() throws Exception {
+    UUID c = collection(), shared = collection();
+    JsonNode created = create(c, profile(3), "none", 202);
+    UUID i = UUID.fromString(created.path("id").asText());
+    run(UUID.fromString(created.path("job_id").asText()));
+    mvc.perform(put(path(shared) + "/" + i)).andExpect(status().isNoContent());
+    UUID doc = UUID.randomUUID(), unit = UUID.randomUUID();
+    jdbc.update("INSERT INTO dvp.documents(id,collection_id,external_id) VALUES (?,?,'source')", doc, c);
+    jdbc.update("INSERT INTO dvp.vector_units(id,collection_id,indexation_id,document_id,ordinal,embedding_key) VALUES (?,?,?,?,0,'original')", unit, c, i, doc);
+    String table = IndexationService.table(i);
+    jdbc.update("INSERT INTO dvp." + table + "(unit_id,document_id,indexation_id,embedding,origin) VALUES (?,?,?,'[1,0,0]'::vector,'imported')", unit, doc, i);
+    String search = "{\"query\":{\"vector\":[1,0,0]},\"mode\":\"exact\"}";
+    mvc.perform(post("/api/v2/indexations/" + i + "/search").contentType(MediaType.APPLICATION_JSON).content(search))
+        .andExpect(status().isOk()).andExpect(jsonPath("$.results[0].document_id").value(doc.toString()));
+    String body = "{\"operation\":\"build_ann\",\"ann_strategy\":\"hnsw_vector\"}";
+    var request = post(path(c) + "/" + i + "/maintenance-jobs").header("Idempotency-Key", "enable-ann")
+        .contentType(MediaType.APPLICATION_JSON).content(body);
+    var first = mvc.perform(request).andExpect(status().isAccepted()).andReturn();
+    UUID job = UUID.fromString(mapper.readTree(first.getResponse().getContentAsString()).path("id").asText());
+    var replay = mvc.perform(post(path(c) + "/" + i + "/maintenance-jobs").header("Idempotency-Key", "enable-ann")
+        .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isAccepted()).andReturn();
+    assertEquals(job.toString(), mapper.readTree(replay.getResponse().getContentAsString()).path("id").asText());
+    assertEquals("none", jdbc.queryForObject("SELECT ann_strategy FROM dvp.indexations WHERE id=?", String.class, i));
+    run(job);
+    mvc.perform(get(path(shared) + "/" + i)).andExpect(status().isOk())
+        .andExpect(jsonPath("$.ann_strategy").value("hnsw_vector"))
+        .andExpect(jsonPath("$.ann_state").value("ready"));
+    assertEquals("[1,0,0]", jdbc.queryForObject("SELECT embedding::text FROM dvp." + table + " WHERE unit_id=?", String.class, unit));
+    mvc.perform(post("/api/v2/indexations/" + i + "/search").contentType(MediaType.APPLICATION_JSON)
+        .content(search.replace("exact", "approximate"))).andExpect(status().isOk())
+        .andExpect(jsonPath("$.results[0].document_id").value(doc.toString()));
+    mvc.perform(post(path(c) + "/" + i + "/maintenance-jobs").header("Idempotency-Key", "different-strategy")
+        .contentType(MediaType.APPLICATION_JSON).content(body.replace("hnsw_vector", "hnsw_halfvec")))
+        .andExpect(status().isConflict());
+  }
+
+  @Test
+  void concurrentRequestsWithDifferentStrategiesCannotCorruptReadyAnnState() throws Exception {
+    UUID c = collection();
+    JsonNode created = create(c, profile(3), "none", 202);
+    UUID i = UUID.fromString(created.path("id").asText());
+    run(UUID.fromString(created.path("job_id").asText()));
+    String route = path(c) + "/" + i + "/maintenance-jobs";
+    var first = mvc.perform(post(route).header("Idempotency-Key", "strategy-vector")
+        .contentType(MediaType.APPLICATION_JSON)
+        .content("{\"operation\":\"build_ann\",\"ann_strategy\":\"hnsw_vector\"}"))
+        .andExpect(status().isAccepted()).andReturn();
+    var second = mvc.perform(post(route).header("Idempotency-Key", "strategy-half")
+        .contentType(MediaType.APPLICATION_JSON)
+        .content("{\"operation\":\"build_ann\",\"ann_strategy\":\"hnsw_halfvec\"}"))
+        .andExpect(status().isAccepted()).andReturn();
+    run(UUID.fromString(mapper.readTree(first.getResponse().getContentAsString()).path("id").asText()));
+    var lease = jobs.claim("test-" + UUID.randomUUID(), Set.of("maintenance")).orElseThrow();
+    assertEquals(UUID.fromString(mapper.readTree(second.getResponse().getContentAsString()).path("id").asText()), lease.jobId());
+    assertThrows(IllegalStateException.class, () -> handlers.find("maintenance").orElseThrow().run(lease, jobs));
+    mvc.perform(get(path(c) + "/" + i)).andExpect(status().isOk())
+        .andExpect(jsonPath("$.ann_strategy").value("hnsw_vector"))
+        .andExpect(jsonPath("$.ann_state").value("ready"));
+  }
+
+  @Test
+  void enablingAnnValidatesDimensionsAndOperation() throws Exception {
+    UUID c = collection();
+    JsonNode created = create(c, profile(2001), "none", 202);
+    UUID i = UUID.fromString(created.path("id").asText());
+    run(UUID.fromString(created.path("job_id").asText()));
+    mvc.perform(post(path(c) + "/" + i + "/maintenance-jobs").header("Idempotency-Key", "too-wide")
+        .contentType(MediaType.APPLICATION_JSON).content("{\"operation\":\"build_ann\",\"ann_strategy\":\"hnsw_vector\"}"))
+        .andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.code").value("ann_dimensions_unsupported"));
+    mvc.perform(post(path(c) + "/" + i + "/maintenance-jobs").header("Idempotency-Key", "invalid-operation")
+        .contentType(MediaType.APPLICATION_JSON).content("{\"operation\":\"reconcile\",\"ann_strategy\":\"hnsw_vector\"}"))
+        .andExpect(status().isBadRequest());
+    assertEquals("none", jdbc.queryForObject("SELECT ann_strategy FROM dvp.indexations WHERE id=?", String.class, i));
   }
 
   @Test

@@ -23,8 +23,6 @@ export function SearchPage() {
     setQueryText,
     queryProfile,
     setQueryProfile,
-    mode,
-    setMode,
     top,
     setTop,
     group,
@@ -43,6 +41,10 @@ export function SearchPage() {
   const [embeddingSource, setEmbeddingSource] = useState<'server' | 'browser'>('server')
   const [browserModelId, setBrowserModelId] = useState('')
   const [browserStatus, setBrowserStatus] = useState('')
+  const [modeOverride, setModeOverride] = useState<{ indexation: string; mode: 'exact' | 'approximate' } | null>(null)
+  const approximateAvailable = activeIndex?.capabilities?.approximate === true
+  const preferredMode = modeOverride?.indexation === indexation ? modeOverride.mode : 'approximate'
+  const mode = preferredMode === 'approximate' && !approximateAvailable ? 'exact' : preferredMode
   const browserModels = compatibleBrowserModels(indexProfile)
   const browserModel = browserModels.find((model) => model.id === browserModelId)
   const browserAvailable =
@@ -146,7 +148,7 @@ export function SearchPage() {
               value={indexation}
               set={(v) => {
                 setIndexation(v)
-                setMode('exact')
+                setModeOverride(null)
                 setQueryProfile('')
                 setBrowserModelId('')
                 setCollection('')
@@ -228,7 +230,7 @@ export function SearchPage() {
             <div className="grid">
               <label>
                 {t.mode}
-                <select value={mode} onChange={(e) => setMode(e.target.value)}>
+                <select value={mode} onChange={(e) => setModeOverride({ indexation, mode: e.target.value as 'exact' | 'approximate' })}>
                   <option value="exact">{t.exact}</option>
                   <option value="approximate" disabled={!activeIndex?.capabilities?.approximate}>
                     {t.approximate}

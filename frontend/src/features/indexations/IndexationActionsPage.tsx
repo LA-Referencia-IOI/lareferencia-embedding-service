@@ -4,6 +4,8 @@ import { Select } from '../../components/Select'
 import { enc } from '../../api'
 import { lines } from '../../state/utils'
 export function IndexationActionsPage() {
+  const [annStrategy, setAnnStrategy] = useState('hnsw_vector')
+  const [maintenanceJob, setMaintenanceJob] = useState('')
   const {
     t,
     setNotice,
@@ -22,7 +24,18 @@ export function IndexationActionsPage() {
     perform,
     mutate,
     attached,
+    busy,
+    setJob,
+    setJobId,
+    changePage,
   } = useConsole()
+  const selectedIndex = indexes.find((item) => item.id === indexation)
+  const needsStrategy = operation === 'build_ann' && selectedIndex?.ann_strategy === 'none'
+  const dimensions = selectedIndex?.profile?.dimensions
+  const strategyTooLarge =
+    needsStrategy && typeof dimensions === 'number' && dimensions > (annStrategy === 'hnsw_vector' ? 2000 : 4000)
+  const indexNotReady = operation === 'build_ann' && selectedIndex && selectedIndex.state !== 'ready'
+  const canMaintain = Boolean(selectedIndex && attached.some((item) => item.id === collection))
   return (
     <>
       <Card title={t.attach}>
@@ -83,23 +96,50 @@ export function IndexationActionsPage() {
               <option>build_ann</option>
               <option>reconcile</option>
             </select>
+            {needsStrategy && (
+              <label>
+                {t.annStrategy}
+                <select value={annStrategy} onChange={(e) => setAnnStrategy(e.target.value)}>
+                  <option value="hnsw_vector">HNSW vector (≤ 2000)</option>
+                  <option value="hnsw_halfvec">HNSW halfvec (≤ 4000)</option>
+                </select>
+              </label>
+            )}
             <button
-              disabled={!collection || !indexation}
+              disabled={!canMaintain || busy || strategyTooLarge || Boolean(indexNotReady)}
               className="secondary"
               onClick={() =>
-                void perform(() =>
-                  mutate(
+                void perform(async () => {
+                  setMaintenanceJob('')
+                  const result = await mutate(
                     `/api/v2/collections/${enc(collection)}/indexations/${enc(indexation)}/maintenance-jobs`,
-                    { operation },
-                  ).then(() => {}),
-                )
+                    needsStrategy ? { operation, ann_strategy: annStrategy } : { operation },
+                  )
+                  if (result.status === 202 && result.data?.id) setMaintenanceJob(result.data.id)
+                })
               }
             >
               {t.maintenance}
             </button>
           </div>
+          {needsStrategy && <p>{t.annEnableNotice}</p>}
+          {strategyTooLarge && <p role="alert">{t.annDimensionsUnsupported}</p>}
+          {indexNotReady && <p role="alert">{t.annIndexNotReady}</p>}
+          {maintenanceJob && (
+            <button
+              className="secondary"
+              onClick={() => {
+                setJob(null)
+                setJobId(maintenanceJob)
+                changePage('jobs')
+              }}
+            >
+              {t.viewMaintenanceJob}
+            </button>
+          )}
         </div>
       </Card>
     </>
   )
 }
+import { useState } from 'react'

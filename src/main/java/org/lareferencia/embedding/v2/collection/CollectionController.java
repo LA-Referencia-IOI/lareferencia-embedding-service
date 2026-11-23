@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.*;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.*;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -180,8 +181,14 @@ public class CollectionController {
   }
 
   @PostMapping("/{collection}/indexations/{id}/maintenance-jobs")
-  @Operation(summary = "Schedule index maintenance")
+  @Operation(
+      summary = "Schedule index maintenance",
+      description =
+          "Use build_ann with ann_strategy hnsw_vector or hnsw_halfvec to enable ANN on an existing indexation with strategy none. The job builds the index concurrently without replacing vectors. Omit ann_strategy to build an already configured index. Reconcile verifies physical structures.")
   @ApiResponse(responseCode = "202", description = "Maintenance job created")
+  @io.swagger.v3.oas.annotations.parameters.RequestBody(
+      required = true,
+      content = @Content(examples = @ExampleObject(value = "{\"operation\":\"build_ann\",\"ann_strategy\":\"hnsw_vector\"}")))
   public ResponseEntity<JsonNode> maintenance(
       @PathVariable String collection,
       @PathVariable String id,
