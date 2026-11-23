@@ -1,0 +1,4 @@
+# Browser-only inference: native Node bindings and optional postinstall are not used.
+allowBuilds:
+  onnxruntime-node: false
+  protobufjs: false

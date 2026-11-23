@@ -39,7 +39,10 @@ export function OperationsPage() {
           className="row"
           onSubmit={(e) => {
             e.preventDefault()
-            void perform(async () => setApiOutput((await call(`/actuator/metrics/${enc(metricName)}`)).data))
+            const [name, ...queryParts] = metricName.trim().split('?')
+            const params = new URLSearchParams(queryParts.join('?')).toString()
+            const path = `/actuator/metrics/${enc(name)}${params ? `?${params}` : ''}`
+            void perform(async () => setApiOutput((await call(path)).data))
           }}
         >
           <label>

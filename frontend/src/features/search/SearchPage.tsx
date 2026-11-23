@@ -1,3 +1,6 @@
+import { useState } from 'react'
+import { compatibleBrowserModels, prepareBrowserQuery } from './browser/embedding'
+import { browserEmbedding } from './browser/workerClient'
 import { useConsole } from '../../state/console'
 import { Card } from '../../components/Card'
 import { Select } from '../../components/Select'
@@ -37,6 +40,13 @@ export function SearchPage() {
     candidates,
     attached,
   } = useConsole()
+  const [embeddingSource, setEmbeddingSource] = useState<'server' | 'browser'>('server')
+  const [browserModelId, setBrowserModelId] = useState('')
+  const [browserStatus, setBrowserStatus] = useState('')
+  const browserModels = compatibleBrowserModels(indexProfile)
+  const browserModel = browserModels.find((model) => model.id === browserModelId)
+  const browserAvailable =
+    typeof window !== 'undefined' && window.isSecureContext && 'gpu' in navigator && !!navigator.gpu
   return (
     <>
       <Card title={t.search}>
@@ -45,12 +55,32 @@ export function SearchPage() {
           onSubmit={(e) => {
             e.preventDefault()
             void perform(async () => {
+              let searchQuery: { text: string; profile_id?: string } | { vector: number[] }
+              if (embeddingSource === 'browser') {
+                if (
+                  !browserModel ||
+                  !indexProfile ||
+                  !compatibleBrowserModels(indexProfile).some((model) => model.id === browserModel.id)
+                )
+                  throw new Error(t.browserIncompatible)
+                if (!browserAvailable) throw new Error(t.browserUnavailable)
+                setBrowserStatus(t.browserLoading)
+                try {
+                  const prepared = prepareBrowserQuery(indexProfile, queryText)
+                  const vector = await browserEmbedding(prepared, browserModel.dimensions)
+                  searchQuery = { vector }
+                } finally {
+                  setBrowserStatus('')
+                }
+              } else {
+                searchQuery = { text: queryText, ...(queryProfile ? { profile_id: queryProfile } : {}) }
+              }
               const r = await call(
                 `/api/v2/indexations/${enc(indexation)}/search${query({ collection_id: collection })}`,
                 {
                   method: 'POST',
                   body: {
-                    query: { text: queryText, ...(queryProfile ? { profile_id: queryProfile } : {}) },
+                    query: searchQuery,
                     mode,
                     top_n: top,
                     result_unit: group,
@@ -118,6 +148,7 @@ export function SearchPage() {
                 setIndexation(v)
                 setMode('exact')
                 setQueryProfile('')
+                setBrowserModelId('')
                 setCollection('')
               }}
               items={indexes}
@@ -134,7 +165,53 @@ export function SearchPage() {
             {t.query}
             <textarea rows={4} value={queryText} onChange={(e) => setQueryText(e.target.value)} required />
           </label>
-          {indexProfile?.execution_mode === 'import_only' && (
+          <label>
+            {t.embeddingSource}
+            <select
+              value={embeddingSource}
+              onChange={(event) => {
+                setEmbeddingSource(event.target.value as 'server' | 'browser')
+                setQueryProfile('')
+                setBrowserModelId('')
+              }}
+            >
+              <option value="server">{t.embeddingServer}</option>
+              <option value="browser">{t.embeddingBrowser}</option>
+            </select>
+          </label>
+          {embeddingSource === 'browser' && (
+            <>
+              <p className="notice">{t.browserModelNotice}</p>
+              {!browserAvailable && (
+                <p className="error" role="alert">
+                  {t.browserUnavailable}
+                </p>
+              )}
+              {browserModels.length === 0 ? (
+                <p className="error" role="alert">
+                  {t.browserIncompatible}
+                </p>
+              ) : (
+                <label>
+                  {t.browserModel}
+                  <select
+                    value={browserModelId}
+                    onChange={(event) => setBrowserModelId(event.target.value)}
+                    required
+                  >
+                    <option value="">…</option>
+                    {browserModels.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.model} · {model.dimensions} {t.dimensions}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {browserStatus && <p role="status">{browserStatus}</p>}
+            </>
+          )}
+          {embeddingSource === 'server' && indexProfile?.execution_mode === 'import_only' && (
             <>
               <p className="notice">{t.importOnly}</p>
               {candidates.length === 0 ? (
@@ -197,7 +274,12 @@ export function SearchPage() {
           </details>
           <button
             disabled={
-              busy || !indexation || (indexProfile?.execution_mode === 'import_only' && !queryProfile)
+              busy ||
+              !indexation ||
+              (embeddingSource === 'server' &&
+                indexProfile?.execution_mode === 'import_only' &&
+                !queryProfile) ||
+              (embeddingSource === 'browser' && (!browserAvailable || !browserModel))
             }
           >
             {t.searchButton}

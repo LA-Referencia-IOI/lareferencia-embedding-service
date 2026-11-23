@@ -545,3 +545,9 @@ pnpm dev
 Vite runs on port 8990 and proxies API, Swagger and actuator requests to the backend. To build the backend without the React bundle explicitly, use `./mvnw clean package -Pskip-frontend`; the original backend landing page remains available in that build. The `clean` step ensures assets from an earlier integrated build are not included.
 
 React static assets replace the former root landing page in the integrated JAR; API routes and database schemas are unchanged. To roll back, deploy the previous backend JAR and serve the standalone UI as before. No database migration or vector reindex is required for this integration.
+
+### Browser-generated query vectors
+
+In semantic search the user can select WebGPU inference instead of the configured HTTP provider. The browser loads a pinned, text-only, q4 ONNX conversion of `google/embeddinggemma-2`, applies the indexation profile's query prefix, produces a 768- or normalized 512-dimensional vector, and submits it through the existing vector-search API. The local model is offered only when the indexation uses the same model and dimension with `identity-v1` preparation; server-side profiles are not listed as local models. No API or database migration is required.
+
+This mode needs a WebGPU-capable browser on HTTPS or localhost and network access to the public model artifacts on first use. The ONNX files are not packaged in the JAR. Metadata compatibility does not prove that the index vectors use the same underlying weights; verify model provenance and retrieval quality, particularly when using quantization or fine-tuned models. See [frontend/README.md](frontend/README.md) for details.

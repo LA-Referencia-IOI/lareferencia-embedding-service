@@ -53,3 +53,4 @@ files/
 /frontend/playwright-report/
 /frontend/coverage/
 /frontend/.env.local
+.pnpm-store/

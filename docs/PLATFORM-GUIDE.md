@@ -785,6 +785,8 @@ Requests:
 ```bash
 curl "$BASE/actuator/metrics"
 curl "$BASE/actuator/metrics/dvp.search.duration"
+curl "$BASE/actuator/metrics/dvp.search.stage.duration?tag=stage:embedding&tag=mode:exact"
+curl "$BASE/actuator/metrics/dvp.search.stage.duration?tag=stage:database&tag=mode:exact"
 ```
 
 Example list response **200**:
@@ -800,6 +802,10 @@ Example metric response **200** after a search:
 ```
 
 Available names depend on executed operations. Meters include search duration, rejections, shortfalls and valid approximate candidates; provider duration; registered import bytes; allowlisted API error codes; and job/lease events. They do not label by document, job, collection, indexation, or provider ID. Durable queue counts, retries, vector and table sizes, and alerting still need additional operational collection. Avoid HTTP body, JDBC bind-value, and wire logging for sensitive data.
+
+Each admitted search also writes an INFO log line with the response's `X-Request-Id`, mode, query type, outcome and durations in milliseconds: `embedding_ms`, `database_ms` and `total_ms`. `not_run` means the stage was not reached or was unnecessary (a vector query does not call the provider). The embedding stage covers the provider invocation, including its queue and network; the database stage covers the read transaction, connection acquisition, SQL, ranking and result projections, so it is not a pure PostgreSQL execution time. Total includes initial configuration lookups and preparation but excludes HTTP handling. Failed and timed-out stages are recorded too. No query text or vectors are logged.
+
+For example, find a request with `journalctl -u lareferencia-embedding-service | grep 'request_id=YOUR_REQUEST_ID'`. Compare its stage durations before tuning. The `dvp.search.stage.duration` meter uses bounded `stage`, `mode` and `outcome` tags; Actuator's `COUNT`, `TOTAL_TIME` and `MAX` are aggregate values in seconds, not individual requests. The embedding timer does not measure browser-side inference. The configured search SQL timeout starts after inference; a provider timeout is governed separately. Existing responses and database schema are unchanged; no migration or reindexing is needed. Roll back by deploying the previous application version.
 
 Default pool budgets per instance are 10 write, 8 read, 2 coordination, 4 advisory-lock, and 1 maintenance connection, plus bounded inference. Check actual configuration and aggregate budgets across replicas.
 

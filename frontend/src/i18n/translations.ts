@@ -67,6 +67,16 @@ export const words = {
     approximate: 'Aproximada',
     advanced: 'Opções avançadas',
     query: 'Texto da consulta',
+    embeddingSource: 'Onde gerar o vetor da consulta',
+    embeddingServer: 'Servidor',
+    embeddingBrowser: 'Navegador (WebGPU)',
+    browserModel: 'Modelo disponível no navegador',
+    browserUnavailable: 'WebGPU indisponível. Use um navegador compatível em HTTPS ou localhost.',
+    browserIncompatible:
+      'Nenhum modelo do navegador é compatível com esta indexação. Escolha gerar o vetor no servidor.',
+    browserLoading: 'Carregando o modelo ou gerando o vetor no navegador. O primeiro acesso pode demorar.',
+    browserModelNotice:
+      'Modelo ONNX quantizado (q4): o primeiro uso baixa arquivos do Hugging Face. Verifique se a revisão e os pesos são compatíveis com os vetores indexados; a quantização pode alterar os resultados.',
     count: 'Quantidade',
     group: 'Agrupamento',
     copy: 'Copiar JSON',
@@ -162,6 +172,17 @@ export const words = {
     approximate: 'Aproximada',
     advanced: 'Opciones avanzadas',
     query: 'Texto de consulta',
+    embeddingSource: 'Dónde generar el vector de consulta',
+    embeddingServer: 'Servidor',
+    embeddingBrowser: 'Navegador (WebGPU)',
+    browserModel: 'Modelo disponible en el navegador',
+    browserUnavailable: 'WebGPU no disponible. Use un navegador compatible en HTTPS o localhost.',
+    browserIncompatible:
+      'Ningún modelo del navegador es compatible con esta indexación. Elija generar el vector en el servidor.',
+    browserLoading:
+      'Cargando el modelo o generando el vector en el navegador. El primer acceso puede tardar.',
+    browserModelNotice:
+      'Modelo ONNX cuantizado (q4): el primer uso descarga archivos de Hugging Face. Verifique la compatibilidad de la revisión y los pesos con los vectores indexados; la cuantización puede alterar los resultados.',
     count: 'Cantidad',
     group: 'Agrupación',
     copy: 'Copiar JSON',

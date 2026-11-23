@@ -99,6 +99,7 @@ public class SearchService {
       throw new V2Exception(429, "search_busy", "Search capacity exhausted");
     }
     var sample = io.micrometer.core.instrument.Timer.start(metrics);
+    var timings = new SearchTimings(metrics, mode, hasText ? "text" : "vector");
     String outcome = "success";
     try {
       Config config = config(c, i);
@@ -126,10 +127,9 @@ public class SearchService {
         }
         if (!queryProfile.inferenceCapable())
           throw new V2Exception(409, "profile_not_executable", "Profile has no inference capability");
-        vector =
-            providers
-                .embed(queryProfile, List.of(preparation.query(queryProfile, text, props.getMaxQueryCodePoints())))
-                .getFirst();
+        ProfileResource selectedProfile = queryProfile;
+        String preparedQuery = preparation.query(selectedProfile, text, props.getMaxQueryCodePoints());
+        vector = timings.measure("embedding", () -> providers.embed(selectedProfile, List.of(preparedQuery)).getFirst());
         vector =
             validator.validate(
                 mapper.valueToTree(vector),
@@ -150,11 +150,11 @@ public class SearchService {
               + java.util.concurrent.TimeUnit.SECONDS.toNanos(
                   mode.equals("exact") ? props.getExactTimeoutSeconds() : props.getApproximateTimeoutSeconds());
       try {
-        return reads.execute(tx -> {
+        return timings.measure("database", () -> reads.execute(tx -> {
           Config current = config(c, i);
           check(current, mode);
           return run(c, current, value, requested, unit, mode, includes, deadline);
-        });
+        }));
       } catch (DataAccessException | org.springframework.transaction.TransactionTimedOutException e) {
         if (timeout(e)) throw new V2Exception(503, "search_timeout", "Search timed out");
         throw e;
@@ -164,6 +164,7 @@ public class SearchService {
       throw e;
     } finally {
       sample.stop(metrics.timer("dvp.search.duration", "mode", mode, "outcome", outcome));
+      timings.log(outcome);
       slots.release();
     }
   }
