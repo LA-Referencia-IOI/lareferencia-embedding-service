@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import a paired metadata and vector export into a new v2 collection."""
+"""Import a SQLite vector edition or paired JSONL packages into a new v2 collection."""
 from __future__ import annotations
 
 import argparse
@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from compute_metadata_embeddings import file_entry, package_file, verify_file
+from sqlite_vector_package import SQLiteVectorEdition
 
 LOGGER = logging.getLogger("metadata_import")
 SLUG = re.compile(r"[a-z0-9][a-z0-9_-]{0,99}")
@@ -67,16 +68,62 @@ class IndexTarget:
     created: bool
 
 
+def validate_recipes(recipes, ann):
+    require(isinstance(recipes, list) and recipes, "El manifiesto debe definir al menos una receta")
+    ids = set()
+    for recipe in recipes:
+        slug = recipe["id"]
+        dims = recipe["dimensions"]
+        require(isinstance(slug, str) and SLUG.fullmatch(slug) and slug not in ids,
+                "Las recetas deben tener identificadores válidos y únicos")
+        ids.add(slug)
+        require(type(dims) is int and 1 <= dims <= (2000 if ann == "hnsw_vector" else 16000),
+                f"Dimensión incompatible con la estrategia de índice para {slug}")
+        require(recipe["outputDtype"] == "float32", f"Tipo de vector no soportado para {slug}")
+        for key in ("model", "revision"):
+            value = recipe[key]
+            require(isinstance(value, str) and value.strip() and len(value) <= 255 and "\0" not in value,
+                    f"Valor inválido para {key} de {slug}")
+        template = recipe["input"]["queryTemplate"]
+        require(isinstance(template, str) and template.endswith("{query}") and template.count("{query}") == 1
+                and len(template.removesuffix("{query}")) <= 8192 and "\0" not in template,
+                f"Plantilla de consulta no representable como prefijo fijo para {slug}")
+
+def export_index_rows(index):
+    return iter(index.execute(
+        "SELECT file,position,network,catalog_id,identifier,metadata_hash,record_key,export_id,variant "
+        "FROM records WHERE status='EXPORTED' ORDER BY file COLLATE BINARY,position"
+    ))
+
+
+def export_document(entry, locator, line, record, export_id, variant):
+    identity = (locator, line, record["network"], record["catalogId"], record["identifier"], record["metadataHash"])
+    require(entry is not None and entry[:6] == identity and entry[7:] == (export_id, variant),
+            "Identidad o posición incompatible con records.sqlite")
+    return prepare_document(entry[6], record)
+
+
+def manifest_data(root):
+    raw = package_file(root, "manifest.json").read_bytes()
+    return read_json(raw), "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def listed_files(manifest):
+    files = {entry["path"]: entry for entry in manifest["files"]}
+    require(len(files) == len(manifest["files"]), "Duplicate paths in source manifest")
+    return files
+
+
+def export_part_names(files):
+    return {name for name in files if name.endswith((".jsonl", ".jsonl.gz")) and name != "errors.jsonl"}
+
+
 class Package:
     def __init__(self, source, embeddings, ann):
         source = source.resolve(strict=True)
         embeddings = embeddings.resolve(strict=True)
-        source_manifest = package_file(source, "manifest.json")
-        vector_manifest = package_file(embeddings, "manifest.json")
-        self.source_hash = file_entry(source_manifest)["sha256"]
-        self.vector_hash = file_entry(vector_manifest)["sha256"]
-        original = self.original = read_json(source_manifest.read_bytes())
-        derived = self.derived = read_json(vector_manifest.read_bytes())
+        original, source_hash = manifest_data(source)
+        derived, vector_hash = manifest_data(embeddings)
         require(original.get("contractVersion") == 2 and original.get("status") == "COMPLETE"
                 and original["options"]["format"] == "jsonl", "El export debe ser JSONL v2 y COMPLETE")
         require(type(derived.get("formatVersion")) is int and derived["formatVersion"] == 1
@@ -85,8 +132,13 @@ class Package:
                 "El paquete vectorial debe ser JSONL GZIP v1 y COMPLETE")
         self.export_id = original["exportId"]
         self.variant = original["options"]["variant"]
+        self.report_source = {"exportId": self.export_id, "variant": self.variant,
+                              "mappingHash": original.get("mappingHash"), "snapshots": original.get("sources", []),
+                              "metadataManifestSha256": source_hash, "embeddingsManifestSha256": vector_hash}
+        self.text_projection = {"fields": TEXT_FIELDS, "descriptionAbstractQualifier": "abstract",
+                                "blankOccurrences": "preserved in metadata only"}
         require(derived["source"]["exportId"] == self.export_id
-                and derived["source"]["manifestSha256"] == self.source_hash
+                and derived["source"]["manifestSha256"] == source_hash
                 and derived["source"]["variant"] == self.variant
                 and derived["source"].get("mappingHash") == original.get("mappingHash"),
                 "Los manifiestos no corresponden al mismo export")
@@ -94,29 +146,10 @@ class Package:
         require(type(self.count) is int and self.count >= 0 and derived["counts"]["records"] == self.count,
                 "Conteos incompatibles en los manifiestos")
         self.recipes = derived["embeddings"]
-        require(isinstance(self.recipes, list) and self.recipes, "El manifiesto debe definir al menos una receta")
-        ids = set()
-        for recipe in self.recipes:
-            slug = recipe["id"]
-            dims = recipe["dimensions"]
-            require(isinstance(slug, str) and SLUG.fullmatch(slug) and slug not in ids,
-                    "Las recetas deben tener identificadores válidos y únicos")
-            ids.add(slug)
-            require(type(dims) is int and 1 <= dims <= (2000 if ann == "hnsw_vector" else 16000),
-                    f"Dimensión incompatible con la estrategia de índice para {slug}")
-            require(recipe["outputDtype"] == "float32", f"Tipo de vector no soportado para {slug}")
-            for key in ("model", "revision"):
-                value = recipe[key]
-                require(isinstance(value, str) and value.strip() and len(value) <= 255 and "\0" not in value,
-                        f"Valor inválido para {key} de {slug}")
-            template = recipe["input"]["queryTemplate"]
-            require(isinstance(template, str) and template.endswith("{query}") and template.count("{query}") == 1
-                    and len(template.removesuffix("{query}")) <= 8192 and "\0" not in template,
-                    f"Plantilla de consulta no representable como prefijo fijo para {slug}")
-        files = {entry["path"]: entry for entry in original["files"]}
-        require(len(files) == len(original["files"]), "Rutas duplicadas en el export")
+        validate_recipes(self.recipes, ann)
+        files = listed_files(original)
         self.sqlite = verify_file(source, files["records.sqlite"])
-        source_parts = {name for name in files if name.endswith((".jsonl", ".jsonl.gz")) and name != "errors.jsonl"}
+        source_parts = export_part_names(files)
         inventory = derived["parts"]
         require({p["sourceFile"] for p in inventory} == source_parts and len(inventory) == len(source_parts)
                 and len({p["file"] for p in inventory}) == len(inventory), "Correspondencia de partes incompleta o duplicada")
@@ -133,10 +166,7 @@ class Package:
 
     def records(self):
         with closing(sqlite3.connect(self.sqlite.as_uri() + "?mode=ro&immutable=1", uri=True)) as index:
-            rows = iter(index.execute(
-                "SELECT file,position,network,catalog_id,identifier,metadata_hash,record_key,export_id,variant "
-                "FROM records WHERE status='EXPORTED' ORDER BY file COLLATE BINARY,position"
-            ))
+            rows = export_index_rows(index)
             for part in self.parts:
                 opener = gzip.open if part.locator.endswith(".gz") else open
                 count = 0
@@ -145,17 +175,131 @@ class Package:
                         try:
                             require(doc is not None and vec is not None, "Distinto número de líneas")
                             record = read_json(doc)
-                            key = (part.locator, count, record["network"], record["catalogId"], record["identifier"], record["metadataHash"])
-                            entry = next(rows, None)
-                            require(entry is not None and entry[:6] == key and entry[7:] == (self.export_id, self.variant),
-                                    "Identidad o posición incompatible con records.sqlite")
-                            result = prepare_document(entry[6], record)
+                            result = export_document(next(rows, None), part.locator, count, record, self.export_id, self.variant)
                             vectors = prepare_vectors(read_json(vec), self.recipes)
                         except (ValueError, KeyError, TypeError, OverflowError) as exc:
                             raise ValueError(f"{part.locator}:{count}: {exc}") from exc
                         yield *result, vectors
                 require(count == part.count, f"Conteo de líneas incorrecto: {part.locator}")
             require(next(rows, None) is None, "Sobran registros exportados en records.sqlite")
+
+
+
+class SQLitePackage:
+    def __init__(self, embeddings, ann, source=None):
+        self.edition = SQLiteVectorEdition(embeddings)
+        self.count, self.recipes = self.edition.count, self.edition.recipes
+        validate_recipes(self.recipes, ann)
+        self.codec = struct.Struct(f"<{self.recipes[0]['dimensions']}f")
+        self.report_source = {
+            "format": "sqlite",
+            **self.edition.manifest["source"],
+            "embeddingsManifestSha256": self.edition.manifest_hash,
+            "vectorDatabaseSha256": self.edition.manifest["files"][0]["sha256"],
+        }
+        self.text_projection = {"mode": "identity-only"}
+        self.source = source.resolve(strict=True) if source is not None else None
+        if self.source is not None:
+            self.bind_source()
+
+    def bind_source(self):
+        original, digest = manifest_data(self.source)
+        provenance = self.edition.input
+        require(original.get("status") == "COMPLETE" and digest == provenance["manifestSha256"],
+                "Source manifest does not match SQLite vector provenance")
+        files = listed_files(original)
+        self.prepared = "packageId" in provenance
+        if self.prepared:
+            require(original.get("packageType") == "embedding-inputs" and original.get("contractVersion") == 1
+                    and original.get("packageId") == provenance["packageId"], "Expected the prepared embedding-inputs v1 package")
+            parts = original["parts"]
+            count = original["counts"]["emitted"]
+            self.text_projection = {"mode": "prepared-text", "field": "text", "kind": "body"}
+        else:
+            require(original.get("contractVersion") == 2 and original["options"]["format"] == "jsonl"
+                    and original.get("exportId") == provenance["exportId"]
+                    and original["options"]["variant"] == provenance["variant"]
+                    and original.get("mappingHash") == provenance.get("mappingHash"),
+                    "Expected the original JSONL v2 export")
+            parts = sorted(export_part_names(files))
+            count = original["counts"]["exported"]
+            self.index = verify_file(self.source, files["records.sqlite"])
+            self.text_projection = {"fields": TEXT_FIELDS, "descriptionAbstractQualifier": "abstract",
+                                    "blankOccurrences": "preserved in metadata only"}
+        require(count == self.count and parts == [part["sourceFile"] for part in self.edition.parts],
+                "Source inventory or count does not match SQLite vectors")
+        self.source_parts = []
+        for part in self.edition.parts:
+            name = part["sourceFile"]
+            entry = files[name]
+            require(entry["sha256"] == part["sourceSha256"] and entry["bytes"] == part.get("sourceBytes", entry["bytes"]),
+                    f"Source part does not match SQLite vectors: {name}")
+            self.source_parts.append((part, verify_file(self.source, entry)))
+        self.report_source["metadataManifestSha256"] = digest
+
+    def documents(self):
+        index = None
+        try:
+            if not self.prepared:
+                index = sqlite3.connect(self.index.as_uri() + "?mode=ro&immutable=1", uri=True)
+                rows = export_index_rows(index)
+            for part, path in self.source_parts:
+                name = part["sourceFile"]
+                opener = gzip.open if name.endswith(".gz") else open
+                count = 0
+                with opener(path, "rt", encoding="utf-8") as stream:
+                    for count, raw in enumerate(stream, 1):
+                        doc = read_json(raw)
+                        identity = (doc["network"], doc["catalogId"])
+                        if self.prepared:
+                            external, metadata, _, _ = catalog_identity(*identity)
+                            text = unicode_text(doc["text"], 2_000_000)
+                            require(not blank(text), f"Blank prepared text: {name}:{count}")
+                            document = external, metadata, [("import:prepared", "body", None, text, sha256(text))], 0
+                        else:
+                            document = export_document(next(rows, None), name, count, doc,
+                                                       self.edition.input["exportId"], self.edition.input["variant"])
+                        yield (name, count, *identity), document
+                require(count == part["records"], f"Source row count mismatch: {name}")
+            if index is not None:
+                require(next(rows, None) is None, "Extra exported rows in records.sqlite")
+        finally:
+            if index is not None:
+                index.close()
+
+    def records(self):
+        with closing(self.edition.records()) as vectors:
+            if self.source is None:
+                for locator, payload in vectors:
+                    yield *catalog_identity(*locator[2:]), self.decode(locator, payload)
+            else:
+                with closing(self.documents()) as documents:
+                    for vector, document in itertools.zip_longest(vectors, documents):
+                        require(vector is not None and document is not None and vector[0] == document[0],
+                                "Source row identity or position does not match SQLite vectors")
+                        yield *document[1], self.decode(*vector)
+
+    def decode(self, locator, payload):
+        part, line, *_ = locator
+        require(len(payload) == self.codec.size, f"Wrong float32 vector size: {part}:{line}")
+        values = self.codec.unpack(payload)
+        require(all(map(math.isfinite, values)) and any(values), f"Non-finite or zero vector: {part}:{line}")
+        return [json.dumps(values, allow_nan=False, separators=(",", ":"))]
+
+
+def catalog_identity(network, catalog_id):
+    require(unicode_text(network).strip() and unicode_text(catalog_id).strip(), "Blank network or catalog ID")
+    external_id = unicode_text(f"{network}_{catalog_id}", 512)
+    return external_id, {"network": network, "catalogId": catalog_id}, [], 0
+
+
+def open_package(source, embeddings, ann):
+    if embeddings is None:
+        return SQLitePackage(source, ann)
+    manifest, _ = manifest_data(embeddings.resolve(strict=True))
+    if manifest.get("format") == "sqlite":
+        return SQLitePackage(embeddings, ann, source=source)
+    return Package(source, embeddings, ann)
 
 
 def unicode_text(value, limit=None):
@@ -421,8 +565,8 @@ def apply(args, package, report):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", type=Path, help="Export JSONL original del cosechador")
-    parser.add_argument("embeddings", type=Path, help="Paquete separado de vectores")
+    parser.add_argument("source", type=Path, help="SQLite vector edition, or the source package when supplying two directories")
+    parser.add_argument("embeddings", type=Path, nargs="?", help="Vector package when providing its source separately")
     parser.add_argument("--collection-slug", required=True)
     parser.add_argument("--collection-name", required=True)
     parser.add_argument("--ann", choices=("none", "hnsw_vector"), default="none")
@@ -437,17 +581,14 @@ def main():
         require(unicode_text(args.collection_name, 200).strip(), "Nombre de colección vacío")
         require(1 <= args.batch_size <= 1000, "batch-size debe estar entre 1 y 1000")
         require(args.dry_run or args.report is not None, "--report es obligatorio para cargar")
-        package = Package(args.source, args.embeddings, args.ann)
+        package = open_package(args.source, args.embeddings, args.ann)
         report = {
             "formatVersion": 1, "startedAt": timestamp(),
             "collection": {"slug": args.collection_slug, "name": args.collection_name},
-            "source": {"exportId": package.export_id, "variant": package.variant,
-                       "mappingHash": package.original.get("mappingHash"), "snapshots": package.original.get("sources", []),
-                       "metadataManifestSha256": package.source_hash, "embeddingsManifestSha256": package.vector_hash},
+            "source": package.report_source,
             "indexations": [{"slug": recipe["id"], "metric": "cosine", "chunking": "none",
                              "annStrategy": args.ann, "recipe": recipe} for recipe in package.recipes],
-            "textProjection": {"fields": TEXT_FIELDS, "descriptionAbstractQualifier": "abstract",
-                               "blankOccurrences": "preserved in metadata only"},
+            "textProjection": package.text_projection,
             "batchSize": args.batch_size,
         }
         if args.dry_run:
@@ -462,7 +603,7 @@ def main():
             apply(args, package, report)
         print(json.dumps({"status": report["status"], "collection": report["collection"], "counts": report["counts"]}, ensure_ascii=False))
         return 0
-    except (ValueError, OSError, KeyError, TypeError, ImportError, sqlite3.Error, struct.error) as exc:
+    except (ValueError, OSError, KeyError, TypeError, ImportError, sqlite3.Error, struct.error, EOFError, OverflowError) as exc:
         LOGGER.error("%s", exc)
         return 1
 
