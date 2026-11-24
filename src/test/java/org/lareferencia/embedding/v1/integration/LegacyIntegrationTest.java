@@ -92,6 +92,28 @@ class LegacyIntegrationTest {
   }
 
   @Test
+  void createsAndUsesStoresWithModelStyleNamesOverHttp() throws Exception {
+    for (String name : List.of("google/embeddinggemma-2", "embeddinggemma-2:270m")) {
+      String model = "test-provider-model";
+      mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/stores")
+              .contentType("application/json")
+              .content(mapper.writeValueAsString(Map.of("name", name, "model", model, "dimensions", 3))))
+          .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isCreated());
+      org.mockito.Mockito.when(provider.embed(List.of("jesiel"), model, 3))
+          .thenReturn(new EmbeddingProviderService.EmbeddingBatchResult(List.of(new float[] {1, 0, 0}), "ollama", new EmbeddingProviderService.UsageData(0, 0)));
+      mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/embeddings")
+              .contentType("application/json")
+              .content(mapper.writeValueAsString(Map.of("model", name.toUpperCase(Locale.ROOT), "dimensions", 3, "input", "jesiel"))))
+          .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+          .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data[0].embedding[0]").value(1.0));
+      mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/stores")
+              .contentType("application/json")
+              .content(mapper.writeValueAsString(Map.of("name", name.toUpperCase(Locale.ROOT), "model", model, "dimensions", 3))))
+          .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isConflict());
+    }
+  }
+
+  @Test
   void sameModelAndDimensionsCanBeUsedByDifferentStores() {
     String suffix = UUID.randomUUID().toString();
     String model = "model-" + suffix;

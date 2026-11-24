@@ -31,6 +31,13 @@ class CreateStoreRequestTest {
   }
 
   @Test
+  void allowsModelStyleStoreNames() {
+    for (String name : java.util.List.of("google/embeddinggemma-2", "embeddinggemma-2:270m")) {
+      assertTrue(validator.validate(new CreateStoreRequest(name, "model", 768, null)).isEmpty());
+    }
+  }
+
+  @Test
   void rejectsUnsupportedCharactersInStoreName() {
     CreateStoreRequest request = new CreateStoreRequest("qwen3.embedding.4b", "nomic-embed-text", 3, null);
 
@@ -38,7 +45,7 @@ class CreateStoreRequestTest {
 
     assertEquals(1, violations.size());
     assertEquals(
-        "Store name may only contain letters, numbers, spaces, hyphens, and underscores",
+        "Store name may only contain letters, numbers, spaces, hyphens, underscores, slashes, and colons",
         violations.iterator().next().getMessage());
   }
 }

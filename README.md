@@ -71,10 +71,9 @@ environment variables such as `APP_EMBEDDING_PROVIDER_TYPE`.
 | `app.pgvector.index-type` | `APP_PGVECTOR_INDEX_TYPE` | `HNSW` in active configuration; `NONE` in Java-only defaults | Index type used when `createVectorIndex` is true |
 | `app.pgvector.distance-type` | `APP_PGVECTOR_DISTANCE_TYPE` | `COSINE_DISTANCE` | Operator class used for vector indexes |
 
-Provider model names are passed through to the upstream provider. A model may be
-registered with multiple dimensions, but each `model` + `dimensions` pair can
-belong to only one store. Store names are local service identifiers and may
-contain letters, numbers, spaces, hyphens, and underscores, up to 60 characters.
+Provider model names are passed through to the upstream provider. Multiple stores may
+use the same model and dimensions. Store names are local service identifiers and may
+contain letters, numbers, spaces, hyphens, underscores, slashes, and colons, up to 60 characters.
 
 For local Ollama usage, leave `EMBEDDING_PROVIDER_API_KEY` empty. When the value
 is present, the service sends it as a Bearer token to the selected provider.
@@ -209,7 +208,7 @@ Fields:
 
 | Field | Required | Description |
 | :-- | :-- | :-- |
-| `name` | yes | Store name used later in embeddings requests. Allows letters, numbers, spaces, hyphens, and underscores. |
+| `name` | yes | Store name used later in embeddings requests. Allows letters, numbers, spaces, hyphens, underscores, slashes, and colons. |
 | `model` | yes | Provider model name, for example `bge-m3`, `nomic-embed-text`, or `text-embedding-3-small`. |
 | `dimensions` | yes | Positive embedding vector size for the provider model. |
 | `createVectorIndex` | no | When `true`, creates a pgvector ANN index according to `app.pgvector.index-type`. |

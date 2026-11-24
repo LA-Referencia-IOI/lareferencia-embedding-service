@@ -710,7 +710,7 @@ Two stores may use the same provider model and dimensions while keeping separate
 {"name":"embeddinggemma-2 v2","model":"embeddinggemma-2:270m","dimensions":768}
 ```
 
-The store name is unique case-insensitively. The provider receives the model configured on the selected store. Separate stores do not select different model weights by themselves: fine-tuned versions must be exposed by the provider under the appropriate model identifiers.
+The store name is unique case-insensitively and accepts letters, numbers, spaces, hyphens, underscores, slashes and colons, up to 60 characters; for example, `google/embeddinggemma-2` or `embeddinggemma-2:270m`. The provider receives the model configured on the selected store. Separate stores do not select different model weights by themselves: fine-tuned versions must be exposed by the provider under the appropriate model identifiers. No database migration or reindexing is required for the expanded name validation; on rollback, old versions may reject creation of new stores using the additional characters.
 
 ### `GET /api/v1/stores`
 

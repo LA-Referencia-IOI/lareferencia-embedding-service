@@ -29,7 +29,7 @@ public class StoreController {
   @Operation(
       summary = "Create store",
       description =
-          "Creates a new embedding store with a name, model and dimensions, then initializes the dedicated pgvector table.")
+          "Creates a store and its dedicated vector table. Names allow letters, numbers, spaces, hyphens, underscores, slashes and colons; use the store name as model when requesting embeddings.")
   @ApiResponses({
     @ApiResponse(responseCode = "201", description = "Store created successfully"),
     @ApiResponse(responseCode = "400", description = "Invalid payload"),
