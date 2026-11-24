@@ -503,13 +503,15 @@ space. No historical cache is converted into documents or automatically reindexe
 
 ### Browser access (CORS)
 
-The API permits local UI origins on ports 8990 and 5173 (`localhost` and `127.0.0.1`) by default. For another frontend host or port, set `CORS_ALLOWED_ORIGINS` to a comma-separated list of exact origins, for example:
+When `app.cors.allowed-origins` is absent or empty, no cross-origin browser access is allowed. The example configuration permits local UI origins on ports 8990 and 5173 (`localhost` and `127.0.0.1`) by default and reads the optional `CORS_ALLOWED_ORIGINS` environment variable. For another frontend host or port, set that variable to a comma-separated list of exact origins, for example:
 
 ```bash
 export CORS_ALLOWED_ORIGINS='https://ui.example.org,http://localhost:8990'
 ```
 
 Restart the API after changing the configuration. CORS allows `Content-Type`, `Authorization`, `Idempotency-Key`, and `If-Match` request headers and exposes `ETag`, `Location`, `X-Request-Id`, and `Retry-After` to the browser. CORS is not authentication or authorization; enforce access controls in the API or gateway. Revert this configuration and deploy the previous version to roll back. No database migration or reindexing is required.
+
+The integrated UI uses the same origin as the API and does not need CORS. If an external configuration file defines `app.cors.allowed-origins=${CORS_ALLOWED_ORIGINS}` without a default, the environment variable must be set for that process; alternatively use `${CORS_ALLOWED_ORIGINS:}` for an empty default. For systemd, set the variable in the service environment, not only in an interactive shell.
 
 ### v1 store-name lookup upgrade
 
